@@ -24,5 +24,13 @@
     "@types/node": "^20.0.0"
   },
   "keywords": ["mcp", "vouchstone", "knowledge-graph", "ai-agents"],
-  "license": "MIT"
+  "license": "Apache-2.0",
+  "author": "Vouchstone LLC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GGChamp85/Vouchstone.git",
+    "directory": "data-plane/mcp-server"
+  },
+  "homepage": "https://vouchstone.ai",
+  "files": ["dist", "LICENSE", "NOTICE"]
 }
