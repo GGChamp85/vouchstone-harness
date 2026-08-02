@@ -1,0 +1,32 @@
+# Reference Runtime Configuration
+#
+# NOTE: this file is not currently read by the runtime -- actual config
+# comes from environment variables via src/config.py's pydantic Settings
+# (VOUCHSTONE_-prefixed). Kept as a documented reference of the available
+# settings; keep it in sync with config.py's fields if either changes.
+
+runtime:
+  debug: false
+  log_level: INFO
+  workers: 4
+
+control_plane:
+  url: https://your-control-plane-host.example.com  # required -- see VOUCHSTONE_CONTROL_PLANE_URL
+  sync_interval: 300
+
+memory:
+  vector_db:
+    type: chromadb
+    collection: vouchstone_memory
+  
+  graph_db:
+    enabled: false
+
+models:
+  default: gpt-4-turbo-preview
+  embedding: text-embedding-3-small
+
+monitoring:
+  prometheus:
+    enabled: true
+    port: 9090

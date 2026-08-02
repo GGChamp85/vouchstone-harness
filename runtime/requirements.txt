@@ -1,0 +1,42 @@
+# Core
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+
+# AI/ML
+openai>=1.10.0
+anthropic>=0.18.0
+transformers>=4.36.0
+torch>=2.1.0
+
+# Vector DBs
+chromadb>=0.4.22
+qdrant-client>=1.7.0
+
+# Graph DB
+neo4j>=5.15.0
+
+# Message Queue
+celery>=5.3.0
+redis>=5.0.0
+
+# Monitoring
+prometheus-client>=0.19.0
+structlog>=24.1.0
+
+# Utils
+httpx>=0.26.0
+python-multipart>=0.0.6
+aiofiles>=23.2.0
+python-jose[cryptography]>=3.3.0
+cryptography>=41.0.0
+
+# Vouchstone SDK — the runtime imports `vouchstone_sdk` at both module and
+# call-site scope (Agent/AgentConfig/EntityGraph/etc.) but this was never
+# declared here, so a container built from just this file could never
+# actually import it. Installed from the sibling package in this repo;
+# the Dockerfile's build context must be data-plane/ (not data-plane/runtime/)
+# for the relative path below to resolve. Once C9 publishes to PyPI, switch
+# this to a normal pinned `vouchstone-sdk>=<version>` line.
+-e ../sdk/python

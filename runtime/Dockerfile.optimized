@@ -1,0 +1,64 @@
+# Optimized Dockerfile with multi-stage build to reduce final image size
+#
+# Build context MUST be data-plane/ (the parent of this file's directory):
+#   docker build -f data-plane/runtime/Dockerfile.optimized -t vouchstone/runtime data-plane/
+# requirements.txt installs the SDK via `-e ../sdk/python` (editable), which
+# means the SDK source at /sdk/python must be present at RUNTIME too, not
+# just in the builder stage -- pip's editable install records an absolute
+# path back to the source, it doesn't copy the package files into
+# site-packages the way a normal install does.
+FROM python:3.11-slim as builder
+
+WORKDIR /app
+
+# Install build dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# SDK first (sibling path to /app, matching the source tree's layout).
+COPY sdk/python /sdk/python
+
+# Copy requirements and install dependencies
+COPY runtime/requirements.txt .
+# Install all dependencies including build tools
+RUN pip install --user --no-cache-dir --progress-bar off -r requirements.txt
+
+# Final stage - minimal runtime image
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install only runtime dependencies (curl for healthcheck)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && apt-get clean
+
+# Copy installed packages from builder
+COPY --from=builder /root/.local /root/.local
+# SDK source must also ship in the final image -- see note above on why an
+# editable install needs it present at runtime, not just at build time.
+COPY --chown=vouchstone:vouchstone sdk/python /sdk/python
+
+# Create non-root user
+RUN useradd -m -u 1000 vouchstone
+
+# Copy application files
+COPY --chown=vouchstone:vouchstone runtime/src/ ./src/
+COPY --chown=vouchstone:vouchstone runtime/config/ ./config/
+
+# Make sure scripts in .local are usable
+ENV PATH=/root/.local/bin:$PATH
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
+
+# Switch to non-root user
+USER vouchstone
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8080/health || exit 1
+
+CMD ["python", "-m", "src.main"]

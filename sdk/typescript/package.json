@@ -1,0 +1,43 @@
+{
+  "name": "@vouchstone/sdk",
+  "version": "1.1.0",
+  "description": "Vouchstone TypeScript SDK — AI Agents with 5-Layer Memory, Knowledge Graph, and Control Plane Integration",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "test": "jest",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "axios": "^1.6.0",
+    "openai": "^4.20.0",
+    "redis": "^4.6.0",
+    "neo4j-driver": "^5.15.0"
+  },
+  "devDependencies": {
+    "@types/jest": "^29.5.0",
+    "@types/node": "^20.10.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.1.0",
+    "typescript": "^5.3.0"
+  },
+  "peerDependencies": {
+    "redis": ">=4.0.0",
+    "neo4j-driver": ">=5.0.0"
+  },
+  "peerDependenciesMeta": {
+    "redis": { "optional": true },
+    "neo4j-driver": { "optional": true }
+  },
+  "keywords": ["ai", "agents", "memory", "llm", "knowledge-graph", "enterprise"],
+  "license": "Apache-2.0",
+  "author": "Vouchstone LLC",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GGChamp85/Vouchstone.git",
+    "directory": "data-plane/sdk/typescript"
+  },
+  "homepage": "https://vouchstone.ai",
+  "files": ["dist", "LICENSE", "NOTICE", "README.md"]
+}

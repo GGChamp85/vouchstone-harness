@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vouchstone-example-plugin"
+version = "0.1.0"
+description = "Real installable fixture package proving vouchstone_sdk.plugins entry_points discovery against an actual installed distribution, not a mocked importlib.metadata."
+requires-python = ">=3.10"
+dependencies = []
+
+[project.entry-points."vouchstone.eval_graders"]
+exact_match = "example_plugin_pkg.graders:exact_match_grader"
+
+# Deliberately broken entry point, kept in its own dedicated group so it
+# never pollutes the real "vouchstone.eval_graders" group that the SDK's
+# built-in EVAL_GRADERS registry reads from -- only tests that explicitly
+# target this group see the failure.
+[project.entry-points."vouchstone.test_broken_plugin_group"]
+broken = "example_plugin_pkg.graders:this_does_not_exist"
+
+[tool.setuptools.packages.find]
+include = ["example_plugin_pkg*"]
