@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] — 2026-08-08
+
+### Added — OpenCode integration
+- **Agent interop** (`vouchstone_sdk.opencode`): export any Vouchstone agent
+  to OpenCode's format (`.opencode/agents/<name>.md` — description, mode,
+  model, temperature, `permission:` rules **derived from the agent's enforced
+  Scope + posture**; out-of-boundary tools become `deny`, STRICT escalates to
+  `ask`) and import edited files back losslessly (scope/posture round-trip via
+  `x-vouchstone` metadata).
+- **Governed imports** — `governed_import()` / `vouchstone opencode
+  import-agent --governed`: an OpenCode edit of an agent definition passes
+  through Forge's `CompatibilityGate` (agent-definition edits carry
+  `log_to_audit` + `require_dual_signoff` obligations) and lands on a
+  hash-chained trace — including denials and parse failures.
+- **Skills interop** — skill runbooks export to OpenCode skill files;
+  `copy_skill()` clones a skill between agents through the real
+  `ProceduralMemory` registry with a fresh track record.
+- **Workspace scaffold** — `vouchstone opencode init [--from-kg kg.json]`
+  writes agents (optionally auto-derived from a KG artifact, scoped), skills,
+  Vouchstone slash-commands, and `opencode.json` pre-wired with Vouchstone's
+  MCP server so OpenCode sessions query the live KG/memory/vault.
+- **Optimization** — `vouchstone opencode optimize-agent` drives the control
+  plane's real Optimization Studio (`POST /optimization/runs`).
+- **OpenCode adapter verified** — file **deletions** now appear in engine
+  diffs (previously invisible), and a real-binary integration test runs in CI
+  (`sdk-ci.yml` installs `opencode-ai`), closing the long-documented
+  "authored without the binary available" gap; auto-skipped locally.
+
 ### Added — Harness pillar
 - **Unified LLM core** (`vouchstone_sdk.llm`): one provider-agnostic chat
   interface with normalized tool calling. Built-in providers: `openai`,

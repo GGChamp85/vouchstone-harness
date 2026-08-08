@@ -1,62 +1,93 @@
 # Vouchstone SDK
 
-Python SDK for the **Vouchstone Enterprise AI Agent Platform** — build, deploy, and govern production AI agents with persistent memory, full auditability, and enterprise-grade controls.
+**Graph-anchored harness. Infinite supervised agentic scale.**
 
-Vouchstone LLC | [Website](https://vouchstone.ai) | [Docs](https://vouchstone.ai/docs) | [GitHub](https://github.com/GGChamp85/Vouchstone)
+The open-source Python SDK for the Vouchstone Enterprise AI Agent Platform —
+build agents that are **anchored to a verifiable knowledge graph** and run
+inside a **governed harness** where no tool fires unchecked and every step
+is hash-chained.
+
+[![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue.svg)](pyproject.toml)
+[![Tests](https://img.shields.io/badge/tests-177%20passing-brightgreen.svg)](tests/)
+
+Vouchstone LLC | [Website](https://vouchstone.ai) | [Docs](https://vouchstone.ai/docs) | [Platform repo](https://github.com/GGChamp85/Vouchstone)
 
 ---
 
-## What Is Vouchstone?
+## The two pillars
 
-Vouchstone is the first **Accountable AI Engineering Platform** — a control plane + data plane architecture for enterprises that need AI agents they can trust, audit, and govern. The platform provides:
+**1. Knowledge Graph — point at anything, get a signed, verifiable graph.**
 
-- **AI Agent Lifecycle** — Create, deploy, monitor, and retire agents through a managed control plane
-- **5-Layer Persistent Memory** — Working, Episodic, Semantic, Procedural, and Meta-Memory
-- **Document Vault** — 3-layer moderation gateway (Raw/Workspace/Canonical) for all enterprise data
-- **Knowledge Platform** — Automated extraction to Knowledge Graph, Wiki, and Company Brain
-- **Enterprise Governance** — ABAC policies, RACI matrices, cost governance, shadow mode, compliance packs
-- **Multi-Tenant SaaS** — Tenant-isolated data, Stripe billing, SAML/OIDC federation
-- **Enterprise ingestion** — 5 shipped source ingesters (Slack, Jira, Confluence, GitHub, Meetings — Zoom/Teams/Google Meet), extensible via `BaseIngester`; the hosted control plane's connector catalog covers 69 sources
+```bash
+pip install vouchstone-sdk
+vouchstone kg build ./your-repo -o kg.json     # deterministic, offline, no LLM needed
+vouchstone kg verify kg.json                   # tamper-evident: ledger-style hash chain
+vouchstone kg agents kg.json                   # the graph proposes its own scoped agents
+```
 
-This SDK lets you build custom agents that run on the Vouchstone data plane and interact with the control plane APIs.
+Every artifact is a committable JSON file whose manifest is hash-chained with
+the same scheme as Vouchstone's signed ledger: anyone can verify — offline —
+that neither the graph nor its recorded sources were altered. Rebuilds are
+incremental (unchanged files are never re-parsed); unchanged trees produce
+byte-identical signatures. Five real source ingesters (Slack, Jira,
+Confluence, GitHub, Meetings) feed the **same** signed artifact format.
+
+**2. Dynamic Agent Harness — the governed tool-use loop.**
+
+Every tool call is evaluated against a **deny-by-default policy graph before
+it executes**. Every event — turn, tool call, result, denial, human approval
+— lands on a hash-chained trace an auditor can replay. An agent's Knowledge-
+Graph **scope is enforced, not advisory**: out-of-boundary tools are
+structurally impossible, and denials go back to the model as tool errors so
+it adapts instead of hallucinating results. Run it on **any LLM** — OpenAI,
+Anthropic, or anything on the market via the built-in OpenRouter provider
+(`openrouter/<vendor>/<model>` + `OPENROUTER_API_KEY`).
+
+Plus the **OpenCode bridge**: export your agents to
+[OpenCode](https://opencode.ai) (`.opencode/agents/*.md`, permissions derived
+from each agent's enforced scope), edit them with full AI assistance, and
+import them back **through the same governance gate** — with skills, MCP
+access to your live KG/memory/vault, and Vouchstone slash-commands scaffolded
+by `vouchstone opencode init`.
+
+---
+
+## Why enterprises use this
+
+| Enterprise requirement | What the SDK does about it |
+|---|---|
+| *"Prove what the agent knew."* | Signed KG artifacts: the exact grounding is committable, diffable, and offline-verifiable. |
+| *"No agent acts outside its mandate."* | `Scope` compiles into the policy graph's only permits — deny-by-default, per tool call, before execution. |
+| *"Auditable six months later."* | Hash-chained `WorkflowTrace` on every run and every governed change, using the control plane's ledger scheme. |
+| *"Human sign-off on risky actions."* | `HarnessPosture.STRICT`: policy obligations require a synchronous human approval, recorded as `actor="human"` trace entries. |
+| *"No model lock-in."* | One LLM core, three providers built in (OpenAI / Anthropic / OpenRouter → any model), pluggable gateways via entry points. |
+| *"No vendor lock-in on tooling."* | Agents export to OpenCode's open format; skills are markdown; graphs are JSON; everything works air-gapped. |
+| *"Our security team reviews everything."* | Lean core deps (httpx/pydantic/aiofiles), `pip-audit` gated CI, `py.typed`, SECURITY.md, no phone-home. |
 
 ---
 
 ## Install
 
 ```bash
-pip install vouchstone-sdk
+pip install vouchstone-sdk            # lean core — KG pillar works fully offline
 ```
 
-### Optional Extras
+| Extra | Enables |
+|---|---|
+| `llm-openai` | OpenAI + OpenRouter providers, semantic-memory embeddings, LLM extraction/enrichment |
+| `llm-anthropic` | Anthropic provider, `ClaudeEngineAdapter` |
+| `redis` | Working memory on Redis |
+| `vector` | Semantic memory on ChromaDB |
+| `graph` | Procedural memory on Neo4j / Apache AGE |
+| `otel` | OpenTelemetry spans on `Agent.process()` / `Forge.request_change()` |
+| `all` | Everything above |
 
-```bash
-# LLM providers — required only for LLM-touching features
-# (ClaudeEngineAdapter, semantic-memory embeddings, ingestion extraction)
-pip install vouchstone-sdk[llm-openai]
-pip install vouchstone-sdk[llm-anthropic]
-
-# Working memory (Redis-backed per-session context)
-pip install vouchstone-sdk[redis]
-
-# Semantic memory (ChromaDB vector search)
-pip install vouchstone-sdk[vector]
-
-# Procedural memory (Neo4j skill graph)
-pip install vouchstone-sdk[graph]
-
-# OpenTelemetry observability (spans on Agent.process() / Forge.request_change())
-pip install vouchstone-sdk[otel]
-
-# Everything
-pip install vouchstone-sdk[all]
-```
-
-### Requirements
-
-- Python 3.10+
-- A Vouchstone control plane instance (self-hosted or cloud)
-- API key from your Vouchstone tenant
+Requires Python 3.10+. **A control plane is optional**: the KG pillar, the
+harness, Forge, evals, and the OpenCode bridge all run standalone/air-gapped;
+connect a control plane (self-hosted or Vouchstone cloud) for hosted memory,
+the Vault, and team-wide governance — see
+[Standalone vs. Enterprise](#standalone-oss-vs-enterprise-platform).
 
 ---
 
@@ -194,6 +225,85 @@ await pipeline.close()
 
 ---
 
+### 4. The governed harness, end to end
+
+```python
+import asyncio
+from vouchstone_sdk import (
+    AgentConfig, HarnessAgent, HarnessPosture, Scope, ToolRegistry, Message,
+)
+
+def lookup_invoice(invoice_id: str) -> dict:
+    """Look up an invoice by id."""
+    return {"invoice_id": invoice_id, "amount": 1200}
+
+tools = ToolRegistry()
+tools.register(lookup_invoice)          # JSON schema derived from the signature
+
+agent = HarnessAgent(
+    AgentConfig(name="ap-specialist", model="openrouter/anthropic/claude-sonnet-4-6"),
+    tools=tools,
+    scope=Scope(domains=["finance"], allowed_tools=["lookup_invoice"]),
+    posture=HarnessPosture.STRICT,      # obligations require human approval
+)
+
+async def main():
+    await agent.initialize(agent_id="ap-specialist", local_only=True)
+    agent.start_session()
+    response = await agent.process(Message(content="How much is INV-9?"))
+    print(response.content)
+    print("verifiable:", agent.trace.verify_chain(), agent.trace.tip_hash)
+
+asyncio.run(main())
+```
+
+Any tool outside the scope is denied *before* execution and the denial is
+both hash-chained and returned to the model. Swap the model string for any
+provider — nothing else changes.
+
+### 5. Edit your agents in OpenCode
+
+```bash
+# scaffold a full workspace: agents (scoped permissions), skills,
+# Vouchstone MCP server wiring, and slash-commands
+vouchstone opencode init --from-kg kg.json
+
+# ... edit .opencode/agents/finance-specialist.md in OpenCode ...
+
+# import the edit back through the governance gate (Forge CompatibilityGate
+# + signed trace; agent-definition edits carry dual-signoff obligations)
+vouchstone opencode import-agent .opencode/agents/finance-specialist.md \
+    --previous backups/finance-specialist.md --governed
+```
+
+---
+
+## Enterprise workflows
+
+Concrete flows enterprises run with this SDK today:
+
+1. **Codebase onboarding** — `vouchstone kg build` a 200k-LOC repo into a
+   signed graph; commit it; `kg agents` proposes scoped specialists;
+   `opencode init --from-kg` gives every team an editable, governed agent
+   workspace with live MCP access to the graph.
+2. **AP-invoice automation** — a `HarnessAgent` scoped to
+   `domains=["finance"]` with ERP tools as its only permits; STRICT posture
+   routes flagged actions to a human approver; the trace is the audit
+   evidence.
+3. **Slack/Jira knowledge capture** — `build_source_artifact()` turns live
+   sources into the same signed artifact format; `seed_pipeline_from_artifact`
+   grounds any agent's semantic memory in it; `kg diff` shows exactly what
+   changed between syncs.
+4. **Governed code customization** — Forge (engine → compatibility gate →
+   sandbox → signed trace) with OpenCode as the default engine; the
+   deterministic Transformation Engine replays past decisions bit-for-bit
+   (`replay_and_verify`).
+5. **Continuous quality** — the eval harness scores agents per case;
+   `vouchstone opencode optimize-agent` drives the control plane's
+   Optimization Studio (DSPy) against a persona prompt you just edited.
+
+---
+
 ## Architecture
 
 ```
@@ -207,9 +317,9 @@ YOUR AGENT CODE (this SDK)
 | Working Memory    |  sync    | API (FastAPI)     |
 |   (Redis)         |  ---->>  | Control plane     |
 | Semantic Memory   |          | Stripe Billing    |
-|   (ChromaDB)      |          | ABAC / RACI       |
-| Procedural Memory |          | Cost Governance   |
-|   (Neo4j)         |          | Compliance Packs  |
+|   (ChromaDB)      |          | Action Gateway    |
+| Procedural Memory |          | Signed Ledger     |
+|   (Neo4j)         |          | Evals / Optimize  |
 +-------------------+          +-------------------+
 ```
 
@@ -676,6 +786,29 @@ await client.replay_ledger(entries=[
 | `CHROMADB_URL` | No | ChromaDB URL for semantic memory |
 | `NEO4J_URL` | No | Neo4j URL for procedural memory |
 | `OPENAI_API_KEY` | No | For embedding generation (semantic layer) |
+
+---
+
+## Standalone OSS vs. Enterprise Platform
+
+Everything in this repository is Apache-2.0 and works without a Vouchstone
+account. The hosted/enterprise control plane adds the team- and
+compliance-grade layer on top of the same primitives:
+
+| Capability | OSS SDK (this repo) | + Vouchstone Enterprise |
+|---|---|---|
+| Knowledge graph | Signed local artifacts, deterministic + optional LLM pass | Hosted 5-pass LLM extraction pipeline, 69-connector catalog, Document Vault moderation (Raw→Workspace→Canonical), auto-compiled Wiki, Company Brain RAG with cited answers |
+| Agent harness | Governed tool loop, scopes, postures, local traces | Action Gateway with Constitution/Authority-Matrix policy, autonomy levels (L0–L4), approval queues, tenant-wide signed ledger with replay |
+| Memory | 5 layers with your own Redis/Chroma/Neo4j (or in-process) | Hosted multi-tenant memory with Meta-Memory governance (decay, dedup, compression) run for you |
+| Agent discovery | From local artifacts (`kg agents`) | From the live Customer Knowledge Graph (`suggest-from-kg`), with the Strategy Council verifying answers |
+| Evals & optimization | Local eval harness | Evals dashboards, cost-per-run billing, DSPy Optimization Studio |
+| Operations | You run it | Monitoring, usage billing, SLAs, enterprise support, sovereign/air-gap deployment programs |
+
+The upgrade path is incremental: point `VouchstoneClient` at a control plane
+and the same `Agent`/`MemoryPipeline`/`VaultClient` code you wrote against
+local backends starts using hosted ones. Talk to
+[renu@vouchstone.ai](mailto:renu@vouchstone.ai) or see
+[vouchstone.ai/pricing](https://vouchstone.ai/pricing).
 
 ---
 

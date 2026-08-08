@@ -76,6 +76,10 @@ _STUB_SCRIPT = textwrap.dedent(
         noop)
           exit 0
           ;;
+        delete)
+          rm -f "$cwd/obsolete.py"
+          exit 0
+          ;;
         fail)
           echo "stub: simulated failure" >&2
           exit 1
@@ -290,3 +294,19 @@ def test_claude_and_echo_adapters_still_import_and_instantiate():
 
     echo = EchoEngineAdapter(transform=lambda instruction, files: None)
     assert echo.engine_name == "echo-reference"
+
+
+async def test_deleted_files_appear_in_diff_as_empty_new_content(
+    stub_opencode, monkeypatch,
+):
+    """A file the engine removes must show up as a FileChange with
+    new_content="" -- deletions were previously invisible in the diff."""
+    monkeypatch.setenv("OPENCODE_STUB_MODE", "delete")
+    adapter = OpenCodeEngineAdapter(binary_path=str(stub_opencode))
+    diff = await adapter.propose_change(
+        "remove the obsolete module",
+        {"files": {"keep.py": "x = 1\n", "obsolete.py": "old = True\n"}},
+    )
+    deletions = [c for c in diff.changes if c.new_content == ""]
+    assert [c.file_path for c in deletions] == ["obsolete.py"]
+    assert deletions[0].original_content == "old = True\n"

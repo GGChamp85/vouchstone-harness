@@ -84,6 +84,19 @@ from .memory import (
     SemanticMemory,
     WorkingMemory,
 )
+from .opencode import (
+    OpenCodeAgentSpec,
+    agent_definition_policy_graph,
+    agent_to_spec,
+    copy_skill,
+    derive_permissions,
+    diff_agent_markdown,
+    export_agent,
+    export_skill,
+    governed_import,
+    import_agent,
+    init_workspace,
+)
 from .plugins import (
     ENGINE_ADAPTERS,
     EVAL_GRADERS,
@@ -134,7 +147,7 @@ from .types import (
 )
 from .vault import VaultClient
 
-__version__ = "1.5.0"
+__version__ = "1.6.0"
 __all__ = [
     "ingestion",
     "VouchstoneClient",
@@ -162,6 +175,17 @@ __all__ = [
     "ToolRegistry",
     "make_shell_tool",
     "resolve_provider",
+    "OpenCodeAgentSpec",
+    "agent_definition_policy_graph",
+    "agent_to_spec",
+    "copy_skill",
+    "derive_permissions",
+    "diff_agent_markdown",
+    "export_agent",
+    "export_skill",
+    "governed_import",
+    "import_agent",
+    "init_workspace",
     "AgentCandidate",
     "ArtifactDiff",
     "KGArtifact",

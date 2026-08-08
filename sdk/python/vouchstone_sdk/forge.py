@@ -325,18 +325,28 @@ class OpenCodeEngineAdapter(EngineAdapter):
     @staticmethod
     def _diff_workdir(workdir: Path, current_files: dict[str, str]) -> list[FileChange]:
         """Re-read the workdir after the engine ran and diff it against the
-        original file set (sync; called via asyncio.to_thread)."""
+        original file set (sync; called via asyncio.to_thread).
+
+        A file present in the input set but absent from the tree afterwards
+        is a DELETION, represented as a FileChange with new_content="" --
+        previously deletions were silently invisible in the diff."""
         changes: list[FileChange] = []
+        seen: set[str] = set()
         for path in sorted(workdir.rglob("*")):
             if not path.is_file():
                 continue
             rel = path.relative_to(workdir).as_posix()
+            seen.add(rel)
             new_content = path.read_text(errors="replace")
             original_content = current_files.get(rel, "")
             if new_content != original_content:
                 changes.append(FileChange(
                     file_path=rel, original_content=original_content, new_content=new_content,
                 ))
+        for rel in sorted(set(current_files) - seen):
+            changes.append(FileChange(
+                file_path=rel, original_content=current_files[rel], new_content="",
+            ))
         return changes
 
     async def propose_change(self, instruction: str, context: dict[str, Any]) -> Diff:
