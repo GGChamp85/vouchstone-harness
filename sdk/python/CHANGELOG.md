@@ -7,6 +7,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — KG pillar
+- **Signed knowledge-graph artifacts** (`vouchstone_sdk.kg`): point the SDK at
+  any directory and get a committable, tamper-evident JSON graph —
+  deterministic stdlib-`ast` extraction (modules/classes/functions,
+  contains/imports edges), a manifest hash-chained with the same scheme as the
+  control plane's signed ledger, incremental rebuilds (unchanged files are
+  never re-parsed; unchanged trees produce byte-identical signatures),
+  entity-level diffs, and offline verification.
+- **`vouchstone` CLI** (`vouchstone kg build|verify|diff|agents`) — works on a
+  bare core install, air-gapped.
+- **Agent discovery from the graph** — `vouchstone kg agents` /
+  `propose_agents_from_artifact()` derive scoped specialist-agent candidates
+  (domains + entity kinds + persona draft) from the artifact's own domain
+  distribution; `AgentCandidate.to_agent_config_kwargs()` yields a ready
+  `AgentConfig`. Offline counterpart of the control plane's
+  `POST /workforce/agents/suggest-from-kg`.
+- **Artifact-grounded memory** — `seed_pipeline_from_artifact()` upserts a
+  graph's entities into an agent's semantic memory in every backend mode.
+- **Unified KG schema** — ingestion output now converges on the canonical
+  `types.Entity`/`EntityGraph` shape (`to_canonical_entity`,
+  `BaseIngester.build_graph`), and `build_source_artifact()` produces the same
+  signed artifact from a live source (Slack/Jira/...) as a codebase build.
+- **Extraction strategies are real** — the previously empty
+  `EXTRACTION_STRATEGIES` registry now drives `BaseIngester.extract_entities`
+  with two built-ins: `"llm"` (default) and `"deterministic"` (zero-LLM,
+  air-gap-safe); third parties plug in via entry points.
+
 ### Changed
 - **Dependency hygiene (breaking for implicit users):** `openai` and `anthropic`
   are no longer core dependencies — install them via the `llm-openai` /

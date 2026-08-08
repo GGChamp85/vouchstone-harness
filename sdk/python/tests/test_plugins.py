@@ -58,12 +58,13 @@ def test_builtin_registries_have_real_pre_registered_members():
     assert ENGINE_ADAPTERS.get("echo") is EchoEngineAdapter
 
 
-def test_extraction_strategies_registry_starts_empty_and_accepts_registration():
-    # No built-in extraction strategies ship today (extraction lives in
-    # the control plane's proprietary pipeline) -- this registry is a
-    # pure extension point for a customer's own local extraction logic
-    # against EntityGraph/LocalKGStore.
-    assert EXTRACTION_STRATEGIES.names() == []
+def test_extraction_strategies_registry_ships_builtins_and_accepts_registration():
+    # Two built-in strategies ship (registered by vouchstone_sdk.ingestion
+    # .base): "llm" (the default batched LLM extraction) and
+    # "deterministic" (zero-LLM, air-gap-safe). Third parties extend the
+    # same registry.
+    import vouchstone_sdk.ingestion  # noqa: F401  -- registers built-ins
+    assert {"llm", "deterministic"} <= set(EXTRACTION_STRATEGIES.names())
 
     def my_strategy(raw_content, source_metadata):
         return {"entities": [], "edges": []}

@@ -10,9 +10,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
+
+from ..types import Entity as CanonicalEntity
+
+if TYPE_CHECKING:
+    from ..graph import EntityGraph
 
 logger = logging.getLogger("vouchstone.ingestion")
 
@@ -132,6 +137,7 @@ class BaseIngester(ABC):
         openai_model: str = "gpt-4o-mini",
         collection_name: str = "vouchstone_kg",
         http_client: httpx.AsyncClient | None = None,
+        extraction_strategy: str = "llm",
     ) -> None:
         self._chromadb_url = chromadb_url
         self._neo4j_url = neo4j_url
@@ -143,6 +149,9 @@ class BaseIngester(ABC):
         self._http = http_client or httpx.AsyncClient(timeout=30.0)
         self._owns_http = http_client is None
         self._sync_status = SyncStatus(source=self.source_name)
+        # Resolved lazily through the EXTRACTION_STRATEGIES registry on each
+        # extract_entities() call, so late registrations/overrides apply.
+        self._extraction_strategy = extraction_strategy
         # Constructed lazily on first LLM call (see _openai_client): `openai`
         # is an optional extra, and an ingester is fully usable for
         # connect()/fetch_raw() without it -- only the extraction/embedding
@@ -185,7 +194,23 @@ class BaseIngester(ABC):
         """Fetch raw events from the source since the given timestamp."""
 
     async def extract_entities(self, events: list[RawEvent]) -> list[Entity]:
-        """Use LLM to extract structured entities from raw events."""
+        """Extract structured entities from raw events using this
+        ingester's configured extraction strategy.
+
+        Strategies resolve through the ``EXTRACTION_STRATEGIES`` plugin
+        registry (built-ins: ``"llm"`` — the default, batched LLM
+        extraction; ``"deterministic"`` — structure-only, zero-LLM,
+        air-gap-safe). Source-specific subclasses (Slack, Meetings) that
+        override this method entirely keep doing so — the strategy hook is
+        for the shared default path.
+        """
+        from ..plugins import EXTRACTION_STRATEGIES
+
+        strategy = EXTRACTION_STRATEGIES.get(self._extraction_strategy)
+        return await strategy(self, events)
+
+    async def _llm_extract_entities(self, events: list[RawEvent]) -> list[Entity]:
+        """The ``"llm"`` strategy: batched JSON-mode LLM extraction."""
         if not events:
             return []
 
@@ -472,3 +497,105 @@ class BaseIngester(ABC):
 
     def get_sync_status(self) -> SyncStatus:
         return self._sync_status
+
+    def build_graph(self, entities: list[Entity],
+                    relationships: list[Relationship]) -> EntityGraph:
+        """Assemble extracted output into the SDK's canonical
+        :class:`~vouchstone_sdk.graph.EntityGraph` -- the same structure
+        ``vouchstone kg build`` produces from a codebase, so a Slack sync
+        and an ast pass land in one schema instead of the two disjoint
+        shapes ingestion and semantic memory historically used."""
+        from ..graph import EntityGraph
+
+        graph = EntityGraph()
+        for entity in entities:
+            graph.add_entity(to_canonical_entity(entity))
+        for rel in relationships:
+            if graph.get_entity(rel.source_entity_id) and graph.get_entity(rel.target_entity_id):
+                graph.add_edge(
+                    rel.source_entity_id, rel.target_entity_id, rel.type,
+                    attributes={"confidence": rel.confidence, **rel.metadata},
+                )
+        return graph
+
+
+def to_canonical_entity(entity: Entity) -> CanonicalEntity:
+    """Ingestion ``Entity`` -> the SDK-wide canonical ``types.Entity``.
+
+    One schema across the whole KG pillar: EntityGraph, semantic memory,
+    KG artifacts, and ingestion all speak ``types.Entity``. ``domains``
+    carries the source name so domain-scoped agents
+    (AgentConfig.scoped_domains) can bound themselves to e.g. everything
+    that came out of Slack.
+    """
+    return CanonicalEntity(
+        id=entity.id,
+        entity_type=entity.type.value,
+        entity_key=f"{entity.source or 'unknown'}:{entity.name}",
+        attributes={
+            "name": entity.name,
+            "description": entity.description,
+            "source_event_id": entity.source_event_id,
+            "domains": [entity.source] if entity.source else [],
+            **entity.attributes,
+        },
+        confidence=entity.confidence,
+    )
+
+
+async def llm_extraction_strategy(ingester: BaseIngester,
+                                  events: list[RawEvent]) -> list[Entity]:
+    """The default strategy: batched LLM extraction (requires the
+    ``llm-openai`` extra)."""
+    return await ingester._llm_extract_entities(events)
+
+
+async def deterministic_extraction_strategy(ingester: BaseIngester,
+                                            events: list[RawEvent]) -> list[Entity]:
+    """Zero-LLM, air-gap-safe extraction from event structure alone.
+
+    Produces exactly what the raw events state -- one entity per event
+    (typed from the event's own ``type`` when it matches the EntityType
+    taxonomy, DOCUMENT otherwise) and one PERSON entity per distinct
+    author -- with confidence 1.0, because nothing here is inferred. No
+    relationships (those require inference by definition).
+    """
+    entities: dict[str, Entity] = {}
+    for event in events:
+        try:
+            etype = EntityType(event.type)
+        except ValueError:
+            etype = EntityType.DOCUMENT
+        name = event.content.strip().splitlines()[0][:80] if event.content.strip() else event.id
+        ent = Entity(
+            id=f"ent-{hashlib.sha256(f'{etype.value}:{name}'.encode()).hexdigest()[:16]}",
+            type=etype,
+            name=name,
+            description=event.content[:200],
+            source=ingester.source_name,
+            source_event_id=event.id,
+            confidence=1.0,
+            attributes={"timestamp": event.timestamp.isoformat(), "author": event.author},
+        )
+        entities[ent.dedup_key] = ent
+        if event.author and event.author not in ("Unknown", "unknown", ""):
+            person = Entity(
+                id=f"ent-{hashlib.sha256(f'person:{event.author}'.encode()).hexdigest()[:16]}",
+                type=EntityType.PERSON,
+                name=event.author,
+                description=f"Author of {ingester.source_name} activity",
+                source=ingester.source_name,
+                confidence=1.0,
+            )
+            entities.setdefault(person.dedup_key, person)
+    return list(entities.values())
+
+
+def _register_builtin_strategies() -> None:
+    from ..plugins import EXTRACTION_STRATEGIES
+
+    EXTRACTION_STRATEGIES.register("llm", llm_extraction_strategy)
+    EXTRACTION_STRATEGIES.register("deterministic", deterministic_extraction_strategy)
+
+
+_register_builtin_strategies()
