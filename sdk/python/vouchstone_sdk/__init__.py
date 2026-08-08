@@ -44,6 +44,15 @@ from .graph import (
     canonical_json,
     compute_entry_hash,
 )
+from .harness import (
+    CommandPolicy,
+    HarnessAgent,
+    HarnessPosture,
+    RegisteredTool,
+    Scope,
+    ToolRegistry,
+    make_shell_tool,
+)
 from .kg import (
     AgentCandidate,
     ArtifactDiff,
@@ -55,6 +64,16 @@ from .kg import (
     seed_pipeline_from_artifact,
     semantic_enrich,
     verify_artifact,
+)
+from .llm import (
+    LLM_PROVIDERS,
+    AnthropicProvider,
+    ChatResponse,
+    LLMProvider,
+    OpenAIProvider,
+    OpenRouterProvider,
+    ToolCallRequest,
+    resolve_provider,
 )
 from .memory import (
     EpisodicMemory,
@@ -128,6 +147,21 @@ __all__ = [
     "SemanticMemory",
     "ProceduralMemory",
     "MetaMemory",
+    "AnthropicProvider",
+    "ChatResponse",
+    "CommandPolicy",
+    "HarnessAgent",
+    "HarnessPosture",
+    "LLM_PROVIDERS",
+    "LLMProvider",
+    "OpenAIProvider",
+    "OpenRouterProvider",
+    "RegisteredTool",
+    "Scope",
+    "ToolCallRequest",
+    "ToolRegistry",
+    "make_shell_tool",
+    "resolve_provider",
     "AgentCandidate",
     "ArtifactDiff",
     "KGArtifact",

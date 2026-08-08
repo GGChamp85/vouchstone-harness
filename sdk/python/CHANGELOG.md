@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added — Harness pillar
+- **Unified LLM core** (`vouchstone_sdk.llm`): one provider-agnostic chat
+  interface with normalized tool calling. Built-in providers: `openai`,
+  `anthropic`, and **`openrouter`** — the any-LLM gateway (set
+  `OPENROUTER_API_KEY`, use `openrouter/<vendor>/<model>` model strings) so
+  enterprises run the harness on any model on the market. Additional gateways
+  plug in via the `vouchstone.llm_providers` entry-point group.
+- **`HarnessAgent`** (`vouchstone_sdk.harness`): the governed tool-use loop —
+  every tool call is evaluated against a deny-by-default `PolicyGraph`
+  *before* it executes, every event (turn, tool call, result, denial,
+  approval) is appended to a hash-chained `WorkflowTrace`, and denials are
+  returned to the model as tool errors instead of hallucinated results.
+- **`ToolRegistry`** — real JSON-schema `parameters` derived from function
+  signatures/type hints, with actual dispatch (sync and async tools).
+  `Agent.register_tool` historically recorded empty schemas and had no
+  dispatch path.
+- **Security postures** (`HarnessPosture.AUTO` / `STRICT`): under STRICT, any
+  policy obligation requires a synchronous human approval callback; approvals
+  and rejections are trace entries attributed to `actor="human"`.
+- **`Scope`** — an *enforced* KG boundary: bounds memory retrieval
+  (domains/entity kinds/tags), compiles `allowed_tools` into the policy
+  graph's only permits, and namespaces memory keys for per-team isolation.
+- **`CommandPolicy` + `make_shell_tool`** — a predeclared allow/deny-pattern
+  command policy (deny-by-default, deny overrides allow) backing a governed
+  shell tool.
+
 ### Added — KG pillar
 - **Signed knowledge-graph artifacts** (`vouchstone_sdk.kg`): point the SDK at
   any directory and get a committable, tamper-evident JSON graph —
