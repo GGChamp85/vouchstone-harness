@@ -93,49 +93,83 @@ the Vault, and team-wide governance — see
 
 ## Quick Start
 
-### 1. Build a Custom Agent
+The two pillars, end to end: **graph** first, then the **governed harness**
+that runs on top of it — the same order as [The two pillars](#the-two-pillars) above.
+
+### 1. Build the graph in Python
+
+The CLI walkthrough above (`vouchstone kg build/verify/agents`) maps 1:1 onto
+these calls — reach for the Python API when you want the artifact or the
+proposed candidates in-process instead of piping JSON between commands:
 
 ```python
-from vouchstone_sdk import Agent, AgentConfig, Message, AgentResponse, MemoryContext
-
-class DataMigrationAgent(Agent):
-    async def run(self, message: Message, context: MemoryContext) -> AgentResponse:
-        # context.working_memory   — current session turns
-        # context.episodic_context — past session traces
-        # context.semantic_entities — known entities (tech, people, systems)
-        # context.procedural_skills — learned procedures
-        # context.scratchpad       — per-session key-value store
-
-        # Your LLM call here
-        response = await self.llm.complete(
-            system=f"You are {self.config.name}.",
-            messages=[{"role": "user", "content": message.content}],
-        )
-        return AgentResponse(content=response)
-
-config = AgentConfig(
-    name="Data Migration Agent",
-    model="claude-sonnet-4-20250514",
-    system_prompt="You help enterprises migrate data between systems.",
+from vouchstone_sdk import (
+    build_codebase_artifact, verify_artifact, propose_agents_from_artifact,
 )
 
-agent = DataMigrationAgent(config)
-await agent.initialize(
-    agent_id="agent-123",
-    redis_url="redis://localhost:6379",
-    vector_db_url="http://localhost:8002",
-    graph_db_url="bolt://localhost:7687",
-)
+artifact = build_codebase_artifact("./your-repo")
+assert verify_artifact(artifact).valid          # tamper-evident hash chain
 
-session = agent.start_session()
-response = await agent.process(Message(content="Migrate PostgreSQL to Snowflake"))
-print(response.content)
-
-await agent.end_session()
-await agent.close()
+for candidate in propose_agents_from_artifact(artifact):
+    print(candidate.name, "->", candidate.role, "scoped to", candidate.scoped_domains)
+    # AgentConfig(**candidate.to_agent_config_kwargs()) is ready to hand to
+    # HarnessAgent below, with the boundary already attached.
 ```
 
-### 2. Connect to the Control Plane
+### 2. Run the governed harness, end to end
+
+```python
+import asyncio
+from vouchstone_sdk import (
+    AgentConfig, HarnessAgent, HarnessPosture, Scope, ToolRegistry, Message,
+)
+
+def lookup_invoice(invoice_id: str) -> dict:
+    """Look up an invoice by id."""
+    return {"invoice_id": invoice_id, "amount": 1200}
+
+tools = ToolRegistry()
+tools.register(lookup_invoice)          # JSON schema derived from the signature
+
+agent = HarnessAgent(
+    AgentConfig(name="ap-specialist", model="openrouter/anthropic/claude-sonnet-4-6"),
+    tools=tools,
+    scope=Scope(domains=["finance"], allowed_tools=["lookup_invoice"]),
+    posture=HarnessPosture.STRICT,      # obligations require human approval
+)
+
+async def main():
+    await agent.initialize(agent_id="ap-specialist", local_only=True)
+    agent.start_session()
+    response = await agent.process(Message(content="How much is INV-9?"))
+    print(response.content)
+    print("verifiable:", agent.trace.verify_chain(), agent.trace.tip_hash)
+
+asyncio.run(main())
+```
+
+Any tool outside the scope is denied *before* execution and the denial is
+both hash-chained and returned to the model. Swap the model string for any
+provider — nothing else changes.
+
+### 3. Edit your agents in OpenCode
+
+```bash
+# scaffold a full workspace: agents (scoped permissions), skills,
+# Vouchstone MCP server wiring, and slash-commands
+vouchstone opencode init --from-kg kg.json
+
+# ... edit .opencode/agents/finance-specialist.md in OpenCode ...
+
+# import the edit back through the governance gate (Forge CompatibilityGate
+# + signed trace; agent-definition edits carry dual-signoff obligations)
+vouchstone opencode import-agent .opencode/agents/finance-specialist.md \
+    --previous backups/finance-specialist.md --governed
+```
+
+---
+
+### 4. Connect to the Control Plane
 
 ```python
 from vouchstone_sdk import VouchstoneClient
@@ -168,7 +202,7 @@ async with VouchstoneClient(
     )
 ```
 
-### 3. Use the Memory Pipeline Directly
+### 5. Use the Memory Pipeline directly
 
 ```python
 from vouchstone_sdk import MemoryPipeline, Entity, Skill
@@ -223,57 +257,58 @@ await pipeline.end_session("sess-abc")
 await pipeline.close()
 ```
 
----
+### 6. Build a fully custom Agent (lower-level)
 
-### 4. The governed harness, end to end
+`HarnessAgent` above (step 2) is the recommended path — a governed tool
+loop, scope enforcement, and a hash-chained trace, out of the box. Subclass
+`Agent` directly instead when you need your own tool-use loop with none of
+that scaffolding:
+
+`Agent` itself has no built-in LLM client (that's exactly what
+`HarnessAgent` adds) — bring your own call, e.g. via the same
+provider-agnostic `resolve_provider` the harness uses internally:
 
 ```python
-import asyncio
 from vouchstone_sdk import (
-    AgentConfig, HarnessAgent, HarnessPosture, Scope, ToolRegistry, Message,
+    Agent, AgentConfig, Message, AgentResponse, MemoryContext, resolve_provider,
 )
 
-def lookup_invoice(invoice_id: str) -> dict:
-    """Look up an invoice by id."""
-    return {"invoice_id": invoice_id, "amount": 1200}
+class DataMigrationAgent(Agent):
+    async def run(self, message: Message, context: MemoryContext) -> AgentResponse:
+        # context.working_memory   — current session turns
+        # context.episodic_context — past session traces
+        # context.semantic_entities — known entities (tech, people, systems)
+        # context.procedural_skills — learned procedures
+        # context.scratchpad       — per-session key-value store
 
-tools = ToolRegistry()
-tools.register(lookup_invoice)          # JSON schema derived from the signature
+        provider, model_id = resolve_provider(self.config.model)
+        result = await provider.chat(
+            model=model_id,
+            system=f"You are {self.config.name}.",
+            messages=[{"role": "user", "content": message.content}],
+        )
+        return AgentResponse(content=result.content)
 
-agent = HarnessAgent(
-    AgentConfig(name="ap-specialist", model="openrouter/anthropic/claude-sonnet-4-6"),
-    tools=tools,
-    scope=Scope(domains=["finance"], allowed_tools=["lookup_invoice"]),
-    posture=HarnessPosture.STRICT,      # obligations require human approval
+config = AgentConfig(
+    name="Data Migration Agent",
+    model="claude-sonnet-4-6",
+    system_prompt="You help enterprises migrate data between systems.",
 )
 
-async def main():
-    await agent.initialize(agent_id="ap-specialist", local_only=True)
-    agent.start_session()
-    response = await agent.process(Message(content="How much is INV-9?"))
-    print(response.content)
-    print("verifiable:", agent.trace.verify_chain(), agent.trace.tip_hash)
+agent = DataMigrationAgent(config)
+await agent.initialize(
+    agent_id="agent-123",
+    redis_url="redis://localhost:6379",
+    vector_db_url="http://localhost:8002",
+    graph_db_url="bolt://localhost:7687",
+)
 
-asyncio.run(main())
-```
+session = agent.start_session()
+response = await agent.process(Message(content="Migrate PostgreSQL to Snowflake"))
+print(response.content)
 
-Any tool outside the scope is denied *before* execution and the denial is
-both hash-chained and returned to the model. Swap the model string for any
-provider — nothing else changes.
-
-### 5. Edit your agents in OpenCode
-
-```bash
-# scaffold a full workspace: agents (scoped permissions), skills,
-# Vouchstone MCP server wiring, and slash-commands
-vouchstone opencode init --from-kg kg.json
-
-# ... edit .opencode/agents/finance-specialist.md in OpenCode ...
-
-# import the edit back through the governance gate (Forge CompatibilityGate
-# + signed trace; agent-definition edits carry dual-signoff obligations)
-vouchstone opencode import-agent .opencode/agents/finance-specialist.md \
-    --previous backups/finance-specialist.md --governed
+await agent.end_session()
+await agent.close()
 ```
 
 ---
@@ -345,14 +380,17 @@ Subclass `Agent` and implement `run()`. The base class handles:
 - Session management (`start_session`, `end_session`)
 - Memory context preparation (automatic before each turn)
 - Post-turn persistence (automatic after each turn)
-- Tool registration
+- `register_tool(name, func, description)` — a bare `dict[str, Callable]`
+  your own `run()` can consult; it derives no JSON schema and has no
+  dispatch loop. For real schema-derivation + policy-gated dispatch, use
+  `ToolRegistry` with `HarnessAgent` (above) instead.
 
 ### `AgentConfig`
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `name` | str | required | Agent display name |
-| `model` | str | `claude-sonnet-4-20250514` | LLM model identifier |
+| `model` | str | `claude-sonnet-4-6` | LLM model identifier (any provider — see `resolve_provider`) |
 | `temperature` | float | `0.7` | Sampling temperature |
 | `max_tokens` | int | `4096` | Max output tokens |
 | `system_prompt` | str | `None` | System prompt template |
@@ -362,6 +400,70 @@ Subclass `Agent` and implement `run()`. The base class handles:
 | `procedural_memory` | bool | `True` | Enable Layer 4 |
 | `meta_memory` | bool | `True` | Enable Layer 5 |
 | `embedding_model` | str | `text-embedding-3-small` | Embedding model for vector search |
+| `memory_retention_days` | int | `90` | Episodic/working-memory trim horizon |
+| `scoped_subgraph` | list[str] \| None | `None` | KG-boundary: entity-type/skill-tag allowlist for this agent's memory queries (see [`Scope`](#2-run-the-governed-harness-end-to-end) for the enforced-at-runtime version used by `HarnessAgent`) |
+| `scoped_domains` | list[str] \| None | `None` | KG-boundary: `kg_domains` registry slug allowlist (e.g. `["finance"]`) |
+
+### `vouchstone_sdk.kg` — the Knowledge Graph pillar
+
+| Function | Description |
+|---|---|
+| `build_codebase_artifact(root, *, previous=None)` | Deterministic (no LLM) `KGArtifact` from a directory of Python source, via stdlib `ast`. Pass `previous` for an incremental rebuild — unchanged files are carried over, not re-parsed. |
+| `build_source_artifact(ingester, since, *, connect=True)` | Same signed-artifact format, built from a live `BaseIngester` (Slack/Jira/Confluence/GitHub/Meetings) instead of a directory. |
+| `verify_artifact(artifact)` | Re-walks the hash chain; returns `VerifyResult(valid, reason)` — air-gap friendly, no network call. |
+| `diff_artifacts(old, new)` | File- and entity-level `ArtifactDiff` (added/removed/changed on both axes). |
+| `propose_agents_from_artifact(artifact, *, max_candidates=5, min_entities=3)` | Deterministic agent discovery: one `AgentCandidate` per dominant domain, each with `scoped_domains`/`scoped_subgraph` already populated from the graph and a `to_agent_config_kwargs()` ready for `AgentConfig(**...)`. |
+| `semantic_enrich(artifact, *, model="gpt-4o-mini")` | Optional LLM pass that adds module-level summaries to an existing artifact (`llm-openai` extra). |
+| `KGArtifact.save(path)` / `KGArtifact.load(path)` | The artifact is plain JSON — commit it, diff it in a PR, `load()` it back. |
+
+`vouchstone kg build/verify/diff/agents` (the CLI shown in [The two pillars](#the-two-pillars)) is a thin wrapper over exactly these functions — nothing the CLI does is unavailable from Python.
+
+### `vouchstone_sdk.llm` — provider-agnostic LLM core
+
+One async chat interface, three built-in providers, selected entirely by the model string:
+
+```python
+from vouchstone_sdk import resolve_provider   # also: OpenAIProvider, AnthropicProvider, OpenRouterProvider, LLM_PROVIDERS
+
+provider, model_id = resolve_provider("openrouter/anthropic/claude-sonnet-4-6")
+# "claude-*" -> Anthropic, "openai/..." -> OpenAI, anything else -> OpenAI as-is
+response = await provider.chat(model=model_id, messages=[...], tools=[...])
+```
+
+`OpenRouterProvider` is `OpenAIProvider` pointed at `https://openrouter.ai/api/v1`
+with `OPENROUTER_API_KEY` — any model on the OpenRouter catalog, no separate
+SDK. `LLM_PROVIDERS` is a plugin registry (same `entry_points` mechanism as
+`EVAL_GRADERS`/`ENGINE_ADAPTERS`/`EXTRACTION_STRATEGIES`) so a private
+gateway can be registered without touching this package.
+
+### `HarnessAgent`, `Scope`, `ToolRegistry`, `HarnessPosture` — the Harness pillar
+
+| Type | Description |
+|---|---|
+| `Scope(domains=None, entity_types=None, tags=None, allowed_tools=None, namespace=None)` | The enforced KG boundary. `to_policy_graph()` compiles `allowed_tools` into a deny-by-default `PolicyGraph`'s *only* permits; `memory_kwargs()` feeds `AgentConfig.scoped_domains`/`scoped_subgraph`; `namespace` isolates memory keys per scope. |
+| `ToolRegistry()` | `.register(func, *, name=None, description=None)` derives a JSON-schema `parameters` block from the function's signature + type hints via `inspect`. `.dispatch(name, arguments)` calls it (awaiting if async) and returns a string result. |
+| `HarnessAgent(config, *, tools=None, scope=None, policy_graph=None, posture=HarnessPosture.AUTO, approval_callback=None, trace=None, provider=None, max_iterations=8)` | Concrete `Agent` subclass: runs the LLM tool-use loop, evaluates every tool call against the policy graph (explicit `policy_graph` > `scope.to_policy_graph()` > deny-all) *before* executing it, and appends a `WorkflowTrace` entry for every turn and every tool call's decision/outcome. |
+| `HarnessPosture.AUTO` / `.STRICT` | `AUTO`: obligations are logged and traced, execution proceeds. `STRICT`: any obligation on a permitted call blocks on `approval_callback(request, decision) -> bool`; no callback means deny. |
+| `CommandPolicy(allow_patterns, deny_patterns)` + `make_shell_tool(policy)` | A ready-made governed shell tool: deny-by-default regex allowlist, deny patterns override; a rejected command returns `"DENIED: ..."` to the model instead of running. |
+
+A `HarnessAgent` built with neither `scope` nor `policy_graph` has an empty
+policy graph and therefore cannot execute *any* tool — deny-by-default has
+no implicit escape hatch.
+
+### `vouchstone_sdk.opencode` — the OpenCode bridge
+
+| Function | Description |
+|---|---|
+| `export_agent(config, workspace, *, scope=None, posture=HarnessPosture.AUTO, role=None)` | Writes `.opencode/agents/<name>.md`: frontmatter (`model`, `temperature`, `permission` map) derived from `derive_permissions(scope, posture)`, body = persona prompt + KG-boundary preamble. |
+| `import_agent(path)` | Parses an edited `.md` back into `(AgentConfig kwargs, OpenCodeAgentSpec)`. Unsupported frontmatter keys raise `ValueError` rather than silently dropping data. |
+| `governed_import(path, *, previous_markdown=None)` | The same parse, but routed through Forge's `CompatibilityGate` against `agent_definition_policy_graph()` first, with a signed `WorkflowTrace` entry recording the decision — the path CLI's `--governed` flag and CI use. Returns `(kwargs \| None, GateResult, WorkflowTrace)`; a denied or unparseable edit returns `kwargs=None`. |
+| `diff_agent_markdown(old, new, name)` | Unified diff between two agent markdown revisions, for `--preview` and audit trails. |
+| `export_skill(skill, workspace)` / `copy_skill(procedural_memory, name, *, from_agent, to_agent)` | Skill runbooks as `.opencode/skills/<name>/SKILL.md`; `copy_skill` clones a skill between agents through `ProceduralMemory` with a fresh execution track record for the recipient. |
+| `init_workspace(workspace, *, agents=(), skills=(), posture=HarnessPosture.AUTO)` | Scaffolds a full `.opencode/` tree: every agent exported, skills, `opencode.json` pre-wired with the Vouchstone MCP server, and slash-commands (`verify-kg`, `run-evals`, `forge-change`). What `vouchstone opencode init` calls. |
+
+Every agent-definition sync-back (`governed_import`, and `init_workspace`'s
+generated commands) goes through the same Forge gate as any other governed
+change — OpenCode edits are not a side door around policy.
 
 ### `VaultClient`
 
@@ -702,17 +804,19 @@ and it's discoverable with zero code on Vouchstone's side:
 ```python
 from vouchstone_sdk import EVAL_GRADERS, ENGINE_ADAPTERS, EXTRACTION_STRATEGIES
 
-EVAL_GRADERS.names()          # e.g. ["default", "my_grader"] once installed
+EVAL_GRADERS.names()          # ["default", "exact_match", "my_grader"] once installed
 grader = EVAL_GRADERS.get("my_grader")
 ```
 
 For a single script or notebook that doesn't want to publish a whole
 package, register in-process instead: `EVAL_GRADERS.register("my_grader", my_fn)`
 — manual registrations take precedence over discovered ones of the same
-name. `ENGINE_ADAPTERS` ships pre-registered with `echo`, `claude`, and
-`template` (the built-in `EngineAdapter`s from the Forge sections above);
-`EXTRACTION_STRATEGIES` starts empty — a pure extension point for a
-customer's own local extraction logic against `EntityGraph`/`LocalKGStore`.
+name. `ENGINE_ADAPTERS` ships pre-registered with `echo`, `claude`,
+`template`, and `opencode` (the built-in `EngineAdapter`s from the Forge
+sections above and the OpenCode bridge); `EXTRACTION_STRATEGIES` ships
+`llm` and `deterministic` (used by `vouchstone_sdk.ingestion`) and is open
+for a customer's own local extraction logic against
+`EntityGraph`/`LocalKGStore`.
 A broken entry point raises `PluginLoadError` naming the failing plugin
 rather than being silently dropped from the list.
 
@@ -777,15 +881,21 @@ await client.replay_ledger(entries=[
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `VOUCHSTONE_API_KEY` | Yes | API key from your tenant |
-| `VOUCHSTONE_API_URL` | **Yes** | Control plane URL -- required, no default |
-| `VOUCHSTONE_TENANT_ID` | Yes | Your tenant identifier |
-| `REDIS_URL` | No | Redis URL for working memory |
-| `CHROMADB_URL` | No | ChromaDB URL for semantic memory |
-| `NEO4J_URL` | No | Neo4j URL for procedural memory |
-| `OPENAI_API_KEY` | No | For embedding generation (semantic layer) |
+Most SDK classes take their configuration as **explicit constructor
+kwargs** (`VouchstoneClient(api_key=..., control_plane_url=..., tenant_id=...)`,
+`MemoryPipeline(redis_url=..., vector_db_url=..., graph_db_url=...)`) — there
+is no implicit env-var fallback for those, on purpose (a library that
+silently reads ambient env vars is harder to reason about in a multi-tenant
+process). The env vars actually read are narrower:
+
+| Variable | Read by | Purpose |
+|----------|---------|---------|
+| `OPENROUTER_API_KEY` | `OpenRouterProvider` (used whenever `model="openrouter/..."`) | Auth for any model on OpenRouter's catalog |
+| `OPENAI_API_KEY` | The `openai` SDK itself, when `OpenAIProvider`/ingestion's LLM extraction is constructed without an explicit key | Auth for native OpenAI calls and embeddings |
+| `ANTHROPIC_API_KEY` | The `anthropic` SDK itself, when `AnthropicProvider`/`ClaudeEngineAdapter` is constructed without an explicit key | Auth for native Anthropic calls |
+| `VOUCHSTONE_FORGE_ENGINE` | `describe_forge_engine()` / Forge's default-engine resolution | Selects the default `EngineAdapter` (defaults to `opencode`) |
+| `VOUCHSTONE_OPENCODE_PATH` | `OpenCodeEngineAdapter` | Overrides the `opencode` binary path (defaults to `PATH` lookup) |
+| `VOUCHSTONE_API_URL` / `VOUCHSTONE_API_KEY` / `VOUCHSTONE_TENANT_ID` | `vouchstone opencode optimize-agent` (CLI only) | Fallback when `--api-url`/`--api-key`/`--tenant-id` aren't passed |
 
 ---
 
@@ -818,17 +928,22 @@ local backends starts using hosted ones. Talk to
 git clone https://github.com/GGChamp85/Vouchstone.git
 cd Vouchstone/data-plane/sdk/python
 
-pip install -e ".[dev]"
+pip install -e ".[all,dev]"
 
 # Run tests
 pytest tests/ -v
 
-# Format
-black vouchstone_sdk/
+# Lint
+ruff check vouchstone_sdk/
 
 # Type check
-mypy vouchstone_sdk/
+mypy
+
+# Known-vulnerability scan
+pip-audit
 ```
+
+This is exactly the gate `.github/workflows/sdk-ci.yml` and `publish-sdk.yml` run — green locally means green in CI.
 
 ---
 
