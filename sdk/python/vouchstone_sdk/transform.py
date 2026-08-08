@@ -32,11 +32,11 @@ byte-for-byte reproducible.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from .forge import CompatibilityGate, Diff, EngineAdapter, FileChange, GateResult
-
 
 # ============================================================
 # Template definition
@@ -60,7 +60,7 @@ class MissingTemplateParametersError(Exception):
     silently rendered would be exactly the "fabricated" failure mode this
     project has zero tolerance for elsewhere."""
 
-    def __init__(self, template_id: str, missing: List[str]):
+    def __init__(self, template_id: str, missing: list[str]):
         self.template_id = template_id
         self.missing = missing
         super().__init__(f"template {template_id!r} is missing required parameters: {missing}")
@@ -77,19 +77,19 @@ class TransformationTemplate:
     name: str
     description: str
     file_path: str
-    parameters: List[TemplateParameter]
-    render_fn: Callable[[Dict[str, Any]], str]
+    parameters: list[TemplateParameter]
+    render_fn: Callable[[dict[str, Any]], str]
     # Plain-string keyword matching -- deliberately not an LLM classifier.
     # Selecting *which* template applies must be as reproducible as
     # rendering it; an LLM-based matcher would reintroduce the exact
     # non-determinism this module exists to avoid.
-    match_keywords: List[str] = field(default_factory=list)
+    match_keywords: list[str] = field(default_factory=list)
 
     def matches(self, instruction: str) -> bool:
         text = instruction.lower()
         return any(kw.lower() in text for kw in self.match_keywords)
 
-    def render(self, params: Dict[str, Any]) -> str:
+    def render(self, params: dict[str, Any]) -> str:
         missing = [p.name for p in self.parameters if p.required and p.name not in params]
         if missing:
             raise MissingTemplateParametersError(self.id, missing)
@@ -100,18 +100,18 @@ class TemplateLibrary:
     """A collection of templates. Grows over time as more customization
     patterns get codified -- that accumulation is the actual IP."""
 
-    def __init__(self, templates: Optional[List[TransformationTemplate]] = None):
-        self._templates: Dict[str, TransformationTemplate] = {}
+    def __init__(self, templates: list[TransformationTemplate] | None = None):
+        self._templates: dict[str, TransformationTemplate] = {}
         for t in templates or []:
             self.add(t)
 
     def add(self, template: TransformationTemplate) -> None:
         self._templates[template.id] = template
 
-    def get(self, template_id: str) -> Optional[TransformationTemplate]:
+    def get(self, template_id: str) -> TransformationTemplate | None:
         return self._templates.get(template_id)
 
-    def find_match(self, instruction: str) -> Optional[TransformationTemplate]:
+    def find_match(self, instruction: str) -> TransformationTemplate | None:
         """First match wins -- if two templates could both match the same
         instruction, that's a library-authoring problem (overlapping
         keywords), not something to paper over with an implicit priority
@@ -138,16 +138,16 @@ class TemplateEngineAdapter(EngineAdapter):
 
     engine_name = "template-engine"
 
-    def __init__(self, library: TemplateLibrary, fallback_engine: Optional[EngineAdapter] = None):
+    def __init__(self, library: TemplateLibrary, fallback_engine: EngineAdapter | None = None):
         self.library = library
         self.fallback_engine = fallback_engine
 
-    async def propose_change(self, instruction: str, context: Dict[str, Any]) -> Diff:
+    async def propose_change(self, instruction: str, context: dict[str, Any]) -> Diff:
         template = self.library.find_match(instruction)
         if template is not None:
-            params: Dict[str, Any] = context.get("template_params", {})
+            params: dict[str, Any] = context.get("template_params", {})
             new_content = template.render(params)
-            current_files: Dict[str, str] = context.get("files", {})
+            current_files: dict[str, str] = context.get("files", {})
             return Diff(
                 description=f"[templated: {template.name}] {instruction}",
                 changes=[FileChange(
@@ -178,15 +178,15 @@ class TemplateEngineAdapter(EngineAdapter):
 @dataclass
 class ReplayResult:
     reproducible: bool
-    original_content: Optional[str] = None
-    replayed_content: Optional[str] = None
-    original_gate_allow: Optional[bool] = None
-    replayed_gate_allow: Optional[bool] = None
+    original_content: str | None = None
+    replayed_content: str | None = None
+    original_gate_allow: bool | None = None
+    replayed_gate_allow: bool | None = None
     reason: str = ""
 
 
 def replay_and_verify(
-    trace_entry_payload: Dict[str, Any], library: TemplateLibrary, gate: CompatibilityGate,
+    trace_entry_payload: dict[str, Any], library: TemplateLibrary, gate: CompatibilityGate,
 ) -> ReplayResult:
     """Given a past forge.change_evaluated trace entry's payload (see
     Forge.request_change()), re-render the template with the exact same
@@ -203,6 +203,8 @@ def replay_and_verify(
 
     template_id = diff_metadata.get("template_id")
     params = diff_metadata.get("params", {})
+    if not isinstance(template_id, str) or not template_id:
+        return ReplayResult(reproducible=False, reason="trace payload carries no template_id to replay")
     template = library.get(template_id)
     if template is None:
         return ReplayResult(reproducible=False, reason=f"template {template_id!r} not found in the supplied library")
@@ -221,7 +223,8 @@ def replay_and_verify(
     replayed_gate: GateResult = gate.evaluate(replayed_diff)
 
     original_gate_allow = trace_entry_payload.get("gate_allow")
-    content_matches = True  # nothing to compare the rendered content against in the trace payload itself
+    # The trace payload records the gate verdict but not the rendered file
+    # contents, so gate-verdict equality is the reproducibility criterion.
     gate_matches = replayed_gate.allow == original_gate_allow
 
     return ReplayResult(
@@ -241,7 +244,7 @@ def replay_and_verify(
 # threshold changes, policy rule additions.
 # ============================================================
 
-def _render_approval_threshold(params: Dict[str, Any]) -> str:
+def _render_approval_threshold(params: dict[str, Any]) -> str:
     threshold = params["threshold_usd"]
     currency = params.get("currency", "USD")
     return (
@@ -252,7 +255,7 @@ def _render_approval_threshold(params: Dict[str, Any]) -> str:
     )
 
 
-def _render_policy_rule(params: Dict[str, Any]) -> str:
+def _render_policy_rule(params: dict[str, Any]) -> str:
     name = params["policy_name"]
     effect = params["effect"]
     action = params["action"]

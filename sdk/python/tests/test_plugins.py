@@ -18,7 +18,11 @@ from pathlib import Path
 import pytest
 
 from vouchstone_sdk import (
-    ENGINE_ADAPTERS, EVAL_GRADERS, EXTRACTION_STRATEGIES, PluginLoadError, PluginRegistry,
+    ENGINE_ADAPTERS,
+    EVAL_GRADERS,
+    EXTRACTION_STRATEGIES,
+    PluginLoadError,
+    PluginRegistry,
 )
 
 FIXTURE_PKG_DIR = Path(__file__).resolve().parent / "fixtures" / "example_plugin_pkg"

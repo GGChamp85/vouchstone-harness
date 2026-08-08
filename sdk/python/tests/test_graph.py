@@ -10,8 +10,13 @@ from datetime import datetime, timezone
 import pytest
 
 from vouchstone_sdk import (
-    Edge, Entity, EntityGraph, Policy, PolicyGraph, WorkflowTrace,
-    canonical_json, compute_entry_hash,
+    Entity,
+    EntityGraph,
+    Policy,
+    PolicyGraph,
+    WorkflowTrace,
+    canonical_json,
+    compute_entry_hash,
 )
 
 

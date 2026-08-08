@@ -18,7 +18,7 @@ without publishing a whole installable package.
 from __future__ import annotations
 
 import importlib.metadata
-from typing import Any, Dict, List
+from typing import Any
 
 
 class PluginLoadError(Exception):
@@ -34,7 +34,7 @@ class PluginRegistry:
 
     def __init__(self, group: str):
         self.group = group
-        self._manual: Dict[str, Any] = {}
+        self._manual: dict[str, Any] = {}
 
     def register(self, name: str, obj: Any) -> None:
         self._manual[name] = obj
@@ -42,11 +42,11 @@ class PluginRegistry:
     def unregister(self, name: str) -> None:
         self._manual.pop(name, None)
 
-    def discover(self) -> Dict[str, Any]:
+    def discover(self) -> dict[str, Any]:
         """Real setuptools/importlib.metadata entry_points discovery.
         Raises PluginLoadError naming the failing entry point if any
         plugin fails to import."""
-        discovered: Dict[str, Any] = {}
+        discovered: dict[str, Any] = {}
         for ep in importlib.metadata.entry_points(group=self.group):
             try:
                 discovered[ep.name] = ep.load()
@@ -56,7 +56,7 @@ class PluginRegistry:
                 ) from exc
         return discovered
 
-    def all(self) -> Dict[str, Any]:
+    def all(self) -> dict[str, Any]:
         """Manual registrations take precedence over entry_point-discovered
         ones of the same name -- an explicit in-process registration is a
         deliberate override, not a conflict to error on."""
@@ -73,7 +73,7 @@ class PluginRegistry:
             )
         return plugins[name]
 
-    def names(self) -> List[str]:
+    def names(self) -> list[str]:
         return sorted(self.all())
 
 
@@ -88,10 +88,12 @@ EVAL_GRADERS = PluginRegistry("vouchstone.eval_graders")
 
 def _register_builtins() -> None:
     from .eval import default_grader
-    from .forge import ClaudeEngineAdapter, EchoEngineAdapter
+    from .forge import ClaudeEngineAdapter, EchoEngineAdapter, OpenCodeEngineAdapter
 
     ENGINE_ADAPTERS.register("claude", ClaudeEngineAdapter)
     ENGINE_ADAPTERS.register("echo", EchoEngineAdapter)
+    # Default Forge engine as of Phase 5 -- see forge.get_default_engine_adapter().
+    ENGINE_ADAPTERS.register("opencode", OpenCodeEngineAdapter)
     try:
         from .transform import TemplateEngineAdapter
         ENGINE_ADAPTERS.register("template", TemplateEngineAdapter)

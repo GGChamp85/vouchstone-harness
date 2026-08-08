@@ -13,7 +13,6 @@ from enum import Enum
 from typing import Any
 
 import httpx
-import openai
 
 logger = logging.getLogger("vouchstone.ingestion")
 
@@ -140,14 +139,38 @@ class BaseIngester(ABC):
         self._neo4j_password = neo4j_password
         self._collection = collection_name
         self._openai_model = openai_model
+        self._openai_api_key = openai_api_key
         self._http = http_client or httpx.AsyncClient(timeout=30.0)
         self._owns_http = http_client is None
         self._sync_status = SyncStatus(source=self.source_name)
+        # Constructed lazily on first LLM call (see _openai_client): `openai`
+        # is an optional extra, and an ingester is fully usable for
+        # connect()/fetch_raw() without it -- only the extraction/embedding
+        # stages need an LLM.
+        self._oai: Any = None
 
-        if openai_api_key:
-            self._oai = openai.AsyncOpenAI(api_key=openai_api_key)
-        else:
-            self._oai = openai.AsyncOpenAI()
+    @property
+    def _openai_client(self) -> Any:
+        """The AsyncOpenAI client, constructed on first use.
+
+        `openai` moved from a core dependency to the `llm-openai` extra: the
+        SDK must be importable -- and fetch-only ingestion must work --
+        without any LLM vendor package installed. Raises a clear ImportError
+        at the first call site that genuinely needs it, never at import time.
+        """
+        if self._oai is None:
+            try:
+                import openai
+            except ImportError as exc:
+                raise ImportError(
+                    "LLM-powered extraction requires the OpenAI client. "
+                    "Install it with: pip install 'vouchstone-sdk[llm-openai]'"
+                ) from exc
+            if self._openai_api_key:
+                self._oai = openai.AsyncOpenAI(api_key=self._openai_api_key)
+            else:
+                self._oai = openai.AsyncOpenAI()
+        return self._oai
 
     async def close(self) -> None:
         if self._owns_http:
@@ -177,7 +200,7 @@ class BaseIngester(ABC):
             )
 
             try:
-                resp = await self._oai.chat.completions.create(
+                resp = await self._openai_client.chat.completions.create(
                     model=self._openai_model,
                     messages=[
                         {
@@ -246,7 +269,7 @@ class BaseIngester(ABC):
         )
 
         try:
-            resp = await self._oai.chat.completions.create(
+            resp = await self._openai_client.chat.completions.create(
                 model=self._openai_model,
                 messages=[
                     {
@@ -299,7 +322,7 @@ class BaseIngester(ABC):
 
     async def _generate_embedding(self, text: str) -> list[float]:
         """Generate an embedding vector for the given text."""
-        resp = await self._oai.embeddings.create(
+        resp = await self._openai_client.embeddings.create(
             model="text-embedding-3-small",
             input=text[:8000],
         )
@@ -322,7 +345,7 @@ class BaseIngester(ABC):
             metadatas = []
             valid_embeddings = []
 
-            for e, emb in zip(entities, embeddings):
+            for e, emb in zip(entities, embeddings, strict=True):
                 if isinstance(emb, Exception):
                     logger.warning("Embedding failed for %s: %s", e.id, emb)
                     continue

@@ -260,7 +260,7 @@ class MeetingIngester(BaseIngester):
 
             # Use LLM to extract structured meeting data
             try:
-                resp = await self._oai.chat.completions.create(
+                resp = await self._openai_client.chat.completions.create(
                     model=self._openai_model,
                     messages=[
                         {

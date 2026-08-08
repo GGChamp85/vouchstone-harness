@@ -16,7 +16,7 @@ Vouchstone is the first **Accountable AI Engineering Platform** — a control pl
 - **Knowledge Platform** — Automated extraction to Knowledge Graph, Wiki, and Company Brain
 - **Enterprise Governance** — ABAC policies, RACI matrices, cost governance, shadow mode, compliance packs
 - **Multi-Tenant SaaS** — Tenant-isolated data, Stripe billing, SAML/OIDC federation
-- **70+ Integrations** — Slack, Teams, JIRA, GitHub, Salesforce, Snowflake, and more
+- **Enterprise ingestion** — 5 shipped source ingesters (Slack, Jira, Confluence, GitHub, Meetings — Zoom/Teams/Google Meet), extensible via `BaseIngester`; the hosted control plane's connector catalog covers 69 sources
 
 This SDK lets you build custom agents that run on the Vouchstone data plane and interact with the control plane APIs.
 
@@ -31,6 +31,11 @@ pip install vouchstone-sdk
 ### Optional Extras
 
 ```bash
+# LLM providers — required only for LLM-touching features
+# (ClaudeEngineAdapter, semantic-memory embeddings, ingestion extraction)
+pip install vouchstone-sdk[llm-openai]
+pip install vouchstone-sdk[llm-anthropic]
+
 # Working memory (Redis-backed per-session context)
 pip install vouchstone-sdk[redis]
 
@@ -200,7 +205,7 @@ YOUR AGENT CODE (this SDK)
 |                   |          |                   |
 | Agent Runtime     |          | Dashboard (Next.js)|
 | Working Memory    |  sync    | API (FastAPI)     |
-|   (Redis)         |  ---->>  | PostgreSQL        |
+|   (Redis)         |  ---->>  | Control plane     |
 | Semantic Memory   |          | Stripe Billing    |
 |   (ChromaDB)      |          | ABAC / RACI       |
 | Procedural Memory |          | Cost Governance   |
@@ -215,7 +220,7 @@ Each agent has access to a biologically-inspired persistent memory architecture:
 | Layer | Name | Storage | Purpose | Lifecycle |
 |-------|------|---------|---------|-----------|
 | 1 | **Working** | Redis | Current turn context window | Resets per session |
-| 2 | **Episodic** | PostgreSQL | Turn-by-turn traces with importance scoring | Append-only, 90-day retention |
+| 2 | **Episodic** | Control plane API (in-process list when offline) | Turn-by-turn traces with importance scoring | Append-only, 90-day retention |
 | 3 | **Semantic** | ChromaDB | Entity knowledge graph (people, tech, systems) | Upsert with merge on collision |
 | 4 | **Procedural** | Neo4j | Learned skills as versioned DAG with success rates | Version-bumped on update |
 | 5 | **Meta** | Control Plane | Decay, dedup, compress, archive, forget | Scheduled maintenance |
@@ -257,14 +262,14 @@ Async HTTP client for the Document Vault — the enterprise moderation layer:
 | `list_vaults()` | List all vaults in your tenant |
 | `create_vault(name, description)` | Create a new vault |
 | `get_vault(vault_id)` | Fetch vault details |
-| `upload_files(vault_id, files)` | Upload files (PDF, PPTX, DOCX, CSV, etc.) with auto text extraction |
-| `list_tree(vault_id, prefix)` | List documents as a file tree |
-| `get_document(vault_id, path)` | Fetch document content, metadata, extracted text |
-| `search(vault_id, query)` | Full-text search across vault documents |
-| `approve(vault_id, paths)` | Approve documents (promotes Raw → Canonical) |
-| `reject(vault_id, paths)` | Reject documents from moderation queue |
-| `ingest(vault_id, paths, target)` | Ingest approved documents to KG/Wiki/Brain |
-| `set_autopilot(vault_id, source, enabled)` | Toggle auto-pilot ingestion per source |
+| `upload_files(vault_id, files, *, layer, path_prefix)` | Upload files — each entry is a dict with `filename`, `content` (bytes), optional `content_type` |
+| `list_tree(vault_id, *, layer, path)` | List documents in a vault layer as a file tree |
+| `get_document(vault_id, document_id, *, version)` | Fetch a document (optionally a historical commit SHA) |
+| `search(vault_id, query, *, layer, limit)` | Full-text / semantic search within a vault layer |
+| `approve(vault_id, document_ids)` | Approve documents (promotes Workspace → Canonical) |
+| `reject(vault_id, document_ids, *, reason)` | Reject documents from the moderation queue |
+| `ingest(vault_id, *, target)` | Ingest Canonical documents into `"kg"`, `"wiki"`, `"brain"`, or `"all"` |
+| `set_autopilot(vault_id, *, enabled, source_id)` | Toggle auto-pilot ingestion for a vault or one source |
 
 ```python
 from vouchstone_sdk import VaultClient
@@ -276,21 +281,69 @@ async with VaultClient(
 ) as vault:
     # Upload files — text extraction happens server-side
     result = await vault.upload_files("vault-id", [
-        ("report.pdf", open("report.pdf", "rb")),
-        ("data.csv", open("data.csv", "rb")),
+        {"filename": "report.pdf", "content": open("report.pdf", "rb").read(),
+         "content_type": "application/pdf"},
+        {"filename": "data.csv", "content": open("data.csv", "rb").read(),
+         "content_type": "text/csv"},
     ])
+    doc_ids = [d["id"] for d in result["documents"]]
 
     # Browse vault contents
-    tree = await vault.list_tree("vault-id")
+    tree = await vault.list_tree("vault-id", layer="workspace")
 
     # Moderate: approve documents for downstream use
-    await vault.approve("vault-id", ["report.pdf", "data.csv"])
+    await vault.approve("vault-id", doc_ids)
 
-    # Ingest approved docs into Knowledge Graph + Wiki + Brain
-    await vault.ingest("vault-id", ["report.pdf"], target="all")
+    # Ingest approved (Canonical) docs into Knowledge Graph + Wiki + Brain
+    await vault.ingest("vault-id", target="all")
 
     # Enable auto-pilot for a connector source
-    await vault.set_autopilot("vault-id", source="slack", enabled=True)
+    await vault.set_autopilot("vault-id", enabled=True, source_id="slack")
+```
+
+### `DomainClient`
+
+Async HTTP client for the Knowledge-Graph domain builder — talks to the real
+`/api/v1/ckg/domains`, `/ckg/sub-graphs`, and `/ckg/extract` endpoints
+(`app/services/kg_domains.py`, `sub_graphs.py`, `domain_classifier.py`).
+Domains are auto-taxonomy: the extraction pipeline classifies each promoted
+node into domain slugs itself, and any new slug the LLM proposes is
+persisted as a real registry row the instant it's proposed — there's no
+separate "define a domain" step:
+
+| Method | Description |
+|--------|-------------|
+| `list_domains()` | The tenant's full kg_domains registry tree |
+| `curate_domain(slug, name=..., parent_slug=...)` | Rename/re-describe/re-parent a domain's display metadata |
+| `classify()` | Backfill auto-taxonomy classification for unclassified nodes |
+| `list_sub_graphs()` | Every domain with at least one real node, with rollup counts + a computed health score |
+| `get_sub_graph(slug)` | Nodes + edges for one domain (includes descendants' nodes for a department rollup) |
+| `extract_documents(documents)` | Run the N-pass extraction pipeline over raw documents |
+| `get_extraction(job_id)` / `wait_for_extraction(job_id)` | Poll an extraction job to completion |
+
+```python
+from vouchstone_sdk import DomainClient
+
+async with DomainClient(
+    api_key="your-api-key",
+    control_plane_url="https://your-control-plane-host.example.com",  # required, no default
+    tenant_id="your-tenant-id",
+) as dc:
+    # extract -- run extraction over raw documents (or use
+    # VaultClient.ingest(vault_id, target="kg") for vault-moderated content)
+    job = await dc.extract_documents([
+        {"filename": "vendor-contract.md", "content": "..."},
+    ])
+    job = await dc.wait_for_extraction(job.id)
+
+    # domain KG -- backfill classification, then browse the result
+    await dc.classify()
+    domains = await dc.list_domains()
+    sub_graphs = await dc.list_sub_graphs()
+    finance_kg = await dc.get_sub_graph("finance")
+
+    # curate a domain's display metadata (never touches node classifications)
+    await dc.curate_domain("finance", name="Finance & Accounting")
 ```
 
 ### `VouchstoneClient`
@@ -331,6 +384,11 @@ Orchestrates all 5 memory layers:
 | `Entity` | A semantic entity (person, technology, system, etc.) |
 | `Skill` | A procedural skill with steps, tools, success rate |
 | `HealthReport` | Memory health stats and recommendations |
+| `Domain` | A kg_domains registry row (slug, name, hierarchy, display metadata) |
+| `SubGraphSummary` | A domain card with rollup node/edge counts and a computed health score |
+| `SubGraph` | Nodes + edges for one domain |
+| `ExtractionJob` | A CKG extraction job's status and progress |
+| `ClassifyResult` | Result of a domain-classification backfill pass |
 
 ### `EntityGraph`, `PolicyGraph`, `WorkflowTrace` — the three-compartment pattern
 
@@ -374,9 +432,7 @@ algorithm as the control plane's signed ledger
 (`app/services/ledger_signing.py`) — a hash computed locally is
 byte-identical to one computed by the hosted ledger for the same input,
 which is what makes an offline trace independently verifiable rather than
-"trust the SDK's math." Same primitives, same algorithm, in the
-TypeScript SDK (`EntityGraph`, `PolicyGraph`, `WorkflowTrace` from
-`@vouchstone/sdk`).
+"trust the SDK's math."
 
 ### `Forge` — framework-agnostic agent customization
 
@@ -552,6 +608,38 @@ rather than being silently dropped from the list.
 
 ---
 
+### Enterprise ingestion — `vouchstone_sdk.ingestion`
+
+Five real source ingesters feed raw enterprise activity into the Knowledge
+Graph, each speaking its vendor's actual API (no stubs):
+
+| Ingester | Source | Fetches |
+|---|---|---|
+| `SlackIngester` | Slack Web API | channel history incl. thread replies |
+| `JiraIngester` | Jira Cloud REST v3 | issues via JQL, walks ADF rich text |
+| `ConfluenceIngester` | Confluence REST | spaces + paginated page content, HTML→text |
+| `GitHubIngester` | GitHub REST | PRs (+files/reviews), commits, issues |
+| `MeetingIngester` | Zoom / MS Graph / Google Drive | recordings + meeting transcripts |
+
+The shared `BaseIngester` pipeline extracts entities and relationships with an
+LLM (requires the `llm-openai` extra), generates embeddings, and writes to
+ChromaDB + Neo4j. `IngestionPipeline` orchestrates multi-source syncs with
+cross-source dedup.
+
+```python
+from vouchstone_sdk.ingestion import SlackIngester
+from vouchstone_sdk.ingestion.pipeline import IngestionPipeline
+
+pipeline = IngestionPipeline()
+pipeline.register(SlackIngester(bot_token="xoxb-...", chromadb_url="http://chroma:8000"))
+statuses = await pipeline.sync_all()
+```
+
+Subclass `BaseIngester` (implement `connect()` and `fetch_raw()`) to add a
+source; the extraction/dedup/KG-write pipeline is inherited.
+
+---
+
 ## Data Plane Sync
 
 The SDK supports bidirectional sync with the Vouchstone control plane:
@@ -613,4 +701,4 @@ mypy vouchstone_sdk/
 
 ## License
 
-Proprietary — Copyright (c) 2026 Vouchstone LLC. All Rights Reserved.
+Apache-2.0 — Copyright (c) 2026 Vouchstone LLC. See [LICENSE](LICENSE) and [NOTICE](NOTICE).

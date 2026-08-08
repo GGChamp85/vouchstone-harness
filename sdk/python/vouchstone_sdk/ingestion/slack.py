@@ -6,7 +6,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from .base import BaseIngester, Entity, EntityType, RawEvent
+from .base import BaseIngester, Entity, RawEvent
 
 logger = logging.getLogger("vouchstone.ingestion.slack")
 

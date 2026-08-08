@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import logging
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime, timedelta, timezone
 
 from .base import BaseIngester, Entity, Relationship, SyncState, SyncStatus
 
@@ -144,9 +142,12 @@ class IngestionPipeline:
         async def _run_scheduled() -> None:
             while True:
                 await asyncio.sleep(interval_seconds)
-                since = datetime.now(timezone.utc).replace(
-                    hour=datetime.now(timezone.utc).hour - since_hours
-                )
+                # timedelta, NOT .replace(hour=hour - since_hours): the
+                # replace() form raised ValueError("hour must be in 0..23")
+                # whenever the wall-clock hour was smaller than since_hours
+                # (i.e. always, for the default 24), so scheduled syncs
+                # crashed on their very first firing.
+                since = datetime.now(timezone.utc) - timedelta(hours=since_hours)
                 try:
                     await self.sync_all(since)
                 except Exception as exc:

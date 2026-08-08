@@ -7,12 +7,18 @@ signed and logged as a WorkflowTrace entry.
 """
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from vouchstone_sdk import (
-    ClaudeEngineAdapter, CompatibilityGate, Diff, EchoEngineAdapter,
-    FileChange, Forge, Policy, PolicyGraph, SubprocessSandboxRunner,
+    ClaudeEngineAdapter,
+    CompatibilityGate,
+    Diff,
+    EchoEngineAdapter,
+    FileChange,
+    Forge,
+    Policy,
+    PolicyGraph,
+    SubprocessSandboxRunner,
     WorkflowTrace,
+    opencode_dual_signoff_policy_graph,
 )
 
 
@@ -83,6 +89,48 @@ def test_gate_allows_with_matching_permit_policy():
     diff = Diff(description="fine", changes=[FileChange("handler.py", "", "print(1)")], engine_name="test")
     result = gate.evaluate(diff)
     assert result.allow is True
+
+
+def test_gate_branches_obligations_by_engine_opencode_vs_claude():
+    """Proves the gate actually branches differently depending on which
+    engine produced the diff (item 3 of Phase 5): the same file, same
+    instruction, run through opencode_dual_signoff_policy_graph() via two
+    Diffs that differ only in engine_name -- opencode picks up an extra
+    require_dual_signoff obligation that claude-direct does not, and both
+    remain allowed (this is an obligations divergence, not a deny)."""
+    gate = CompatibilityGate(opencode_dual_signoff_policy_graph())
+
+    opencode_diff = Diff(
+        description="patch prod handler", engine_name="opencode",
+        changes=[FileChange("/prod/handler.py", "", "print('patched')")],
+    )
+    claude_diff = Diff(
+        description="patch prod handler", engine_name="claude-direct",
+        changes=[FileChange("/prod/handler.py", "", "print('patched')")],
+    )
+
+    # No explicit principal passed -- proves the gate's own default
+    # (principal = {"engine": diff.engine_name}) is what drives the branch.
+    opencode_result = gate.evaluate(opencode_diff)
+    claude_result = gate.evaluate(claude_diff)
+
+    assert opencode_result.allow is True
+    assert claude_result.allow is True
+    assert "require_dual_signoff" in opencode_result.policy_decision.obligations
+    assert "require_dual_signoff" not in claude_result.policy_decision.obligations
+
+
+def test_gate_dual_signoff_policy_does_not_apply_outside_prod():
+    """The engine-discriminating policy is scoped to /prod/*.py -- an
+    opencode change to a non-prod file must not pick up the obligation."""
+    gate = CompatibilityGate(opencode_dual_signoff_policy_graph())
+    diff = Diff(
+        description="patch dev handler", engine_name="opencode",
+        changes=[FileChange("/dev/handler.py", "", "print('patched')")],
+    )
+    result = gate.evaluate(diff)
+    assert result.allow is True
+    assert "require_dual_signoff" not in result.policy_decision.obligations
 
 
 def test_gate_forbid_blocks_even_with_valid_syntax():
@@ -247,7 +295,7 @@ async def test_claude_engine_adapter_parses_response_into_diff():
     # Confirm the adapter actually called the API with the expected shape.
     mock_client.messages.create.assert_awaited_once()
     call_kwargs = mock_client.messages.create.call_args.kwargs
-    assert call_kwargs["model"] == "claude-sonnet-4-20250514"
+    assert call_kwargs["model"] == "claude-sonnet-4-6"
     assert "add logging to the handler" in call_kwargs["messages"][0]["content"]
 
 

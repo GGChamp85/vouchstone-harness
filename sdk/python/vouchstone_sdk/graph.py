@@ -30,12 +30,12 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 from .types import Entity
-
 
 # ============================================================
 # Canonical JSON + hash chaining
@@ -47,12 +47,12 @@ from .types import Entity
 # rather than "trust the SDK's math."
 # ============================================================
 
-def canonical_json(payload: Dict[str, Any]) -> bytes:
+def canonical_json(payload: dict[str, Any]) -> bytes:
     """RFC 8785-ish canonical JSON: sorted keys, no whitespace, UTF-8."""
     return json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False, default=str).encode("utf-8")
 
 
-def compute_entry_hash(prev_hash: str, payload: Dict[str, Any]) -> str:
+def compute_entry_hash(prev_hash: str, payload: dict[str, Any]) -> str:
     """sha256(prev_hash || canonical_json(payload))."""
     h = hashlib.sha256()
     h.update((prev_hash or "").encode("utf-8"))
@@ -70,7 +70,7 @@ class Edge:
     source_id: str
     target_id: str
     edge_type: str
-    attributes: Dict[str, Any] = field(default_factory=dict)
+    attributes: dict[str, Any] = field(default_factory=dict)
 
 
 class EntityGraph:
@@ -83,22 +83,22 @@ class EntityGraph:
     """
 
     def __init__(self) -> None:
-        self._entities: Dict[str, Entity] = {}
-        self._edges: List[Edge] = []
+        self._entities: dict[str, Entity] = {}
+        self._edges: list[Edge] = []
 
     def add_entity(self, entity: Entity) -> Entity:
         self._entities[entity.id] = entity
         return entity
 
-    def get_entity(self, entity_id: str) -> Optional[Entity]:
+    def get_entity(self, entity_id: str) -> Entity | None:
         return self._entities.get(entity_id)
 
-    def entities_by_type(self, entity_type: str) -> List[Entity]:
+    def entities_by_type(self, entity_type: str) -> list[Entity]:
         return [e for e in self._entities.values() if e.entity_type == entity_type]
 
     def add_edge(
         self, source_id: str, target_id: str, edge_type: str,
-        attributes: Optional[Dict[str, Any]] = None,
+        attributes: dict[str, Any] | None = None,
     ) -> Edge:
         if source_id not in self._entities:
             raise ValueError(f"unknown source entity: {source_id}")
@@ -109,10 +109,10 @@ class EntityGraph:
         self._edges.append(edge)
         return edge
 
-    def related(self, entity_id: str, edge_type: Optional[str] = None) -> List[Entity]:
+    def related(self, entity_id: str, edge_type: str | None = None) -> list[Entity]:
         """Entities reachable from ``entity_id`` via one outbound edge,
         optionally filtered by edge type."""
-        out: List[Entity] = []
+        out: list[Entity] = []
         for e in self._edges:
             if e.source_id != entity_id:
                 continue
@@ -126,10 +126,10 @@ class EntityGraph:
     def __len__(self) -> int:
         return len(self._entities)
 
-    def all_entities(self) -> List[Entity]:
+    def all_entities(self) -> list[Entity]:
         return list(self._entities.values())
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "entities": [
                 {
@@ -148,7 +148,7 @@ class EntityGraph:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "EntityGraph":
+    def from_dict(cls, data: dict[str, Any]) -> EntityGraph:
         graph = cls()
         for ed in data.get("entities", []):
             created_at = ed.get("created_at")
@@ -172,7 +172,7 @@ class EntityGraph:
 # evaluated identically here, offline, by the compatibility gate (C7).
 # ============================================================
 
-_CONDITION_OPS: Dict[str, Callable[[Any, Any], bool]] = {
+_CONDITION_OPS: dict[str, Callable[[Any, Any], bool]] = {
     "eq": lambda v, target: v == target,
     "ne": lambda v, target: v != target,
     "in": lambda v, target: v in (target or []),
@@ -186,7 +186,7 @@ _CONDITION_OPS: Dict[str, Callable[[Any, Any], bool]] = {
 }
 
 
-def _get_path(root: Dict[str, Any], path: str) -> Any:
+def _get_path(root: dict[str, Any], path: str) -> Any:
     cur: Any = root
     for part in path.split("."):
         if isinstance(cur, dict):
@@ -203,22 +203,22 @@ class Policy:
     across every matching ``permit``."""
     name: str
     effect: str  # "permit" | "forbid"
-    action: Optional[Dict[str, Any]] = None  # e.g. {"eq": "schema.alter_table"}
-    resource: Optional[Dict[str, Any]] = None  # e.g. {"data_classification": "pii"}
-    conditions: List[Dict[str, Any]] = field(default_factory=list)  # [{"path", "op", "value"}]
-    obligations: List[str] = field(default_factory=list)
+    action: dict[str, Any] | None = None  # e.g. {"eq": "schema.alter_table"}
+    resource: dict[str, Any] | None = None  # e.g. {"data_classification": "pii"}
+    conditions: list[dict[str, Any]] = field(default_factory=list)  # [{"path", "op", "value"}]
+    obligations: list[str] = field(default_factory=list)
     priority: int = 100
 
 
 @dataclass
 class PolicyDecision:
     allow: bool
-    obligations: List[str] = field(default_factory=list)
-    matched_policy_names: List[str] = field(default_factory=list)
+    obligations: list[str] = field(default_factory=list)
+    matched_policy_names: list[str] = field(default_factory=list)
     reason: str = ""
 
 
-def _matches_action(spec: Optional[Dict[str, Any]], action: str) -> bool:
+def _matches_action(spec: dict[str, Any] | None, action: str) -> bool:
     if not spec:
         return True
     if "eq" in spec and action != spec["eq"]:
@@ -230,7 +230,7 @@ def _matches_action(spec: Optional[Dict[str, Any]], action: str) -> bool:
     return True
 
 
-def _matches_resource(spec: Optional[Dict[str, Any]], resource: Dict[str, Any]) -> bool:
+def _matches_resource(spec: dict[str, Any] | None, resource: dict[str, Any]) -> bool:
     if not spec:
         return True
     for key, target in spec.items():
@@ -244,7 +244,7 @@ def _matches_resource(spec: Optional[Dict[str, Any]], resource: Dict[str, Any]) 
     return True
 
 
-def _matches_conditions(conditions: List[Dict[str, Any]], root: Dict[str, Any]) -> bool:
+def _matches_conditions(conditions: list[dict[str, Any]], root: dict[str, Any]) -> bool:
     for cond in conditions:
         path, op, target = cond.get("path"), cond.get("op"), cond.get("value")
         if not path or op not in _CONDITION_OPS:
@@ -262,22 +262,22 @@ class PolicyGraph:
     (default deny)")."""
 
     def __init__(self) -> None:
-        self._policies: List[Policy] = []
+        self._policies: list[Policy] = []
 
     def add_policy(self, policy: Policy) -> Policy:
         self._policies.append(policy)
         return policy
 
     def evaluate(
-        self, *, principal: Dict[str, Any], action: str,
-        resource: Optional[Dict[str, Any]] = None, context: Optional[Dict[str, Any]] = None,
+        self, *, principal: dict[str, Any], action: str,
+        resource: dict[str, Any] | None = None, context: dict[str, Any] | None = None,
     ) -> PolicyDecision:
         resource = resource or {}
         context = context or {}
         root = {"principal": principal, "action": action, "resource": resource, "context": context}
 
-        obligations: List[str] = []
-        matched: List[str] = []
+        obligations: list[str] = []
+        matched: list[str] = []
         any_permit = False
 
         for policy in sorted(self._policies, key=lambda p: (p.priority, p.name)):
@@ -314,7 +314,7 @@ class WorkflowTraceEntry:
     sequence: int
     kind: str
     actor: str
-    payload: Dict[str, Any]
+    payload: dict[str, Any]
     prev_hash: str
     entry_hash: str
     timestamp: str
@@ -332,9 +332,9 @@ class WorkflowTrace:
     """
 
     def __init__(self) -> None:
-        self._entries: List[WorkflowTraceEntry] = []
+        self._entries: list[WorkflowTraceEntry] = []
 
-    def append(self, kind: str, payload: Dict[str, Any], actor: str = "agent") -> WorkflowTraceEntry:
+    def append(self, kind: str, payload: dict[str, Any], actor: str = "agent") -> WorkflowTraceEntry:
         prev_hash = self._entries[-1].entry_hash if self._entries else ""
         sequence = len(self._entries) + 1
         timestamp = datetime.now(timezone.utc).isoformat()
@@ -355,7 +355,7 @@ class WorkflowTrace:
         return self._entries[-1].entry_hash if self._entries else ""
 
     @property
-    def entries(self) -> List[WorkflowTraceEntry]:
+    def entries(self) -> list[WorkflowTraceEntry]:
         return list(self._entries)
 
     def verify_chain(self) -> bool:
@@ -373,7 +373,7 @@ class WorkflowTrace:
             prev_hash = entry.entry_hash
         return True
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "tip_hash": self.tip_hash,
             "entries": [
@@ -387,7 +387,7 @@ class WorkflowTrace:
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> "WorkflowTrace":
+    def from_dict(cls, data: dict[str, Any]) -> WorkflowTrace:
         trace = cls()
         trace._entries = [
             WorkflowTraceEntry(

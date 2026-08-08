@@ -1,13 +1,17 @@
 """Tests for the local eval harness (C8) -- proves every case genuinely
 runs through the real Agent.process() path (real memory pipeline, real
 run() implementation), not a mock of the agent's behavior."""
-import pytest
 
 from vouchstone_sdk import (
-    Agent, AgentConfig, EvalCase, EvalSuite, GradeResult, default_grader,
+    Agent,
+    AgentConfig,
+    EvalCase,
+    EvalSuite,
+    GradeResult,
+    default_grader,
     run_eval_suite,
 )
-from vouchstone_sdk.types import AgentResponse, Message, MemoryContext
+from vouchstone_sdk.types import AgentResponse, MemoryContext, Message
 
 
 class EchoAgent(Agent):

@@ -99,8 +99,8 @@ class ConfluenceIngester(BaseIngester):
                     body_text = self._html_to_text(body_html)
                     author = version.get("by", {}).get("displayName", "Unknown")
                     labels = [
-                        l.get("name", "")
-                        for l in page.get("metadata", {})
+                        label.get("name", "")
+                        for label in page.get("metadata", {})
                         .get("labels", {})
                         .get("results", [])
                     ]

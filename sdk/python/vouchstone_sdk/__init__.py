@@ -1,99 +1,114 @@
 """Vouchstone Python SDK — Build Accountable AI Agents with 5-Layer Memory"""
 
-from .client import VouchstoneClient
-from .vault import VaultClient
+from . import ingestion
 from .agent import Agent, AgentConfig
-from .memory import (
-    WorkingMemory,
-    EpisodicMemory,
-    SemanticMemory,
-    ProceduralMemory,
-    MetaMemory,
-    MemoryPipeline,
+from .client import VouchstoneClient
+from .domain import DomainClient
+from .eval import (
+    EvalCase,
+    EvalCaseResult,
+    EvalReport,
+    EvalSuite,
+    GradeResult,
+    default_grader,
+    run_eval_suite,
+)
+from .forge import (
+    ClaudeEngineAdapter,
+    CompatibilityGate,
+    Diff,
+    EchoEngineAdapter,
+    EngineAdapter,
+    EngineExecutionError,
+    EngineUnavailableError,
+    FileChange,
+    Forge,
+    ForgeResult,
+    GateResult,
+    OpenCodeEngineAdapter,
+    SandboxResult,
+    SandboxRunner,
+    SubprocessSandboxRunner,
+    describe_forge_engine,
+    get_default_engine_adapter,
+    opencode_dual_signoff_policy_graph,
 )
 from .graph import (
-    EntityGraph,
     Edge,
-    PolicyGraph,
+    EntityGraph,
     Policy,
     PolicyDecision,
+    PolicyGraph,
     WorkflowTrace,
     WorkflowTraceEntry,
     canonical_json,
     compute_entry_hash,
 )
-from .forge import (
-    Forge,
-    ForgeResult,
-    EngineAdapter,
-    ClaudeEngineAdapter,
-    EchoEngineAdapter,
-    Diff,
-    FileChange,
-    CompatibilityGate,
-    GateResult,
-    SandboxRunner,
-    SubprocessSandboxRunner,
-    SandboxResult,
+from .memory import (
+    EpisodicMemory,
+    MemoryBackendUnavailableError,
+    MemoryPipeline,
+    MetaMemory,
+    ProceduralMemory,
+    SemanticMemory,
+    WorkingMemory,
 )
-from .transform import (
-    TemplateParameter,
-    TransformationTemplate,
-    TemplateLibrary,
-    TemplateEngineAdapter,
-    TemplateNotMatchedError,
-    MissingTemplateParametersError,
-    ReplayResult,
-    replay_and_verify,
-    default_template_library,
+from .plugins import (
+    ENGINE_ADAPTERS,
+    EVAL_GRADERS,
+    EXTRACTION_STRATEGIES,
+    PluginLoadError,
+    PluginRegistry,
 )
 from .telemetry import (
     configure_telemetry,
     get_tracer,
     is_otel_available,
-    span,
     record_exception,
+    span,
 )
-from .eval import (
-    EvalCase,
-    EvalSuite,
-    EvalReport,
-    EvalCaseResult,
-    GradeResult,
-    default_grader,
-    run_eval_suite,
-)
-from .plugins import (
-    PluginRegistry,
-    PluginLoadError,
-    ENGINE_ADAPTERS,
-    EXTRACTION_STRATEGIES,
-    EVAL_GRADERS,
+from .transform import (
+    MissingTemplateParametersError,
+    ReplayResult,
+    TemplateEngineAdapter,
+    TemplateLibrary,
+    TemplateNotMatchedError,
+    TemplateParameter,
+    TransformationTemplate,
+    default_template_library,
+    replay_and_verify,
 )
 from .types import (
-    Message,
-    Decision,
+    AgentDefinition,
     AgentResponse,
-    MemoryEntry,
+    AgentStatus,
+    ClassifyResult,
+    Decision,
+    Domain,
+    Entity,
     Episode,
     EpisodicTrace,
-    Entity,
-    Skill,
-    MemoryContext,
-    TurnResult,
+    ExtractionJob,
     HealthReport,
-    AgentDefinition,
-    AgentStatus,
+    MemoryContext,
+    MemoryEntry,
     MemoryLayer,
+    Message,
+    Skill,
+    SubGraph,
+    SubGraphEdge,
+    SubGraphNode,
+    SubGraphSummary,
+    TurnResult,
 )
+from .vault import VaultClient
 
-from . import ingestion
-
-__version__ = "1.4.0"
+__version__ = "1.5.0"
 __all__ = [
     "ingestion",
     "VouchstoneClient",
     "VaultClient",
+    "DomainClient",
     "Agent",
     "AgentConfig",
     "WorkingMemory",
@@ -101,6 +116,7 @@ __all__ = [
     "SemanticMemory",
     "ProceduralMemory",
     "MetaMemory",
+    "MemoryBackendUnavailableError",
     "MemoryPipeline",
     "EntityGraph",
     "Edge",
@@ -116,10 +132,16 @@ __all__ = [
     "EngineAdapter",
     "ClaudeEngineAdapter",
     "EchoEngineAdapter",
+    "OpenCodeEngineAdapter",
+    "EngineUnavailableError",
+    "EngineExecutionError",
+    "get_default_engine_adapter",
+    "describe_forge_engine",
     "Diff",
     "FileChange",
     "CompatibilityGate",
     "GateResult",
+    "opencode_dual_signoff_policy_graph",
     "SandboxRunner",
     "SubprocessSandboxRunner",
     "SandboxResult",
@@ -163,4 +185,11 @@ __all__ = [
     "AgentDefinition",
     "AgentStatus",
     "MemoryLayer",
+    "Domain",
+    "SubGraphSummary",
+    "SubGraphNode",
+    "SubGraphEdge",
+    "SubGraph",
+    "ClassifyResult",
+    "ExtractionJob",
 ]

@@ -19,11 +19,13 @@ installed and configured.
 from __future__ import annotations
 
 import contextlib
-from typing import Any, Dict, Iterator, Optional
+from collections.abc import Iterator
+from typing import Any
 
 _tracer = None
 _otel_available = False
 
+_otel_trace: Any
 try:
     from opentelemetry import trace as _otel_trace
     _otel_available = True
@@ -42,7 +44,7 @@ def is_otel_available() -> bool:
 
 
 def configure_telemetry(
-    service_name: str = "vouchstone-sdk", exporter: Optional[Any] = None,
+    service_name: str = "vouchstone-sdk", exporter: Any | None = None,
     batch: bool = True,
 ) -> bool:
     """Optional convenience setup: a real TracerProvider + (if provided) a
@@ -88,7 +90,7 @@ def get_tracer(name: str = "vouchstone_sdk"):
 
 
 @contextlib.contextmanager
-def span(name: str, attributes: Optional[Dict[str, Any]] = None) -> Iterator[Any]:
+def span(name: str, attributes: dict[str, Any] | None = None) -> Iterator[Any]:
     """Start a span if OTel is available and configured; a real
     contextlib.nullcontext otherwise -- callers never need to branch on
     whether OTel is installed, `with span(...):` always works.

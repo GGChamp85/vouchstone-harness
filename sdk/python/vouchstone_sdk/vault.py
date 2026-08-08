@@ -7,8 +7,7 @@ the Knowledge Graph, Wiki, or Company Brain.
 
 from __future__ import annotations
 
-from pathlib import PurePosixPath
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -37,7 +36,7 @@ class VaultClient:
         self,
         api_key: str,
         control_plane_url: str,
-        tenant_id: Optional[str] = None,
+        tenant_id: str | None = None,
         timeout: float = 60.0,
     ):
         # No default for control_plane_url: api.vouchstone.ai does not
@@ -60,8 +59,8 @@ class VaultClient:
     def _url(self, path: str) -> str:
         return f"/api/v1/vault{path}"
 
-    def _params(self, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        params: Dict[str, Any] = {}
+    def _params(self, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+        params: dict[str, Any] = {}
         if self.tenant_id:
             params["tenant_id"] = self.tenant_id
         if extra:
@@ -70,7 +69,7 @@ class VaultClient:
 
     # ── vault CRUD ─────────────────────────────────────────────────────
 
-    async def list_vaults(self) -> List[Dict[str, Any]]:
+    async def list_vaults(self) -> list[dict[str, Any]]:
         """List all vaults for the current tenant."""
         resp = await self._client.get(
             self._url("s"), params=self._params(),
@@ -83,11 +82,11 @@ class VaultClient:
         name: str,
         *,
         description: str = "",
-        connector_id: Optional[str] = None,
+        connector_id: str | None = None,
         visibility: str = "private",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Create a new vault."""
-        body: Dict[str, Any] = {
+        body: dict[str, Any] = {
             "name": name,
             "description": description,
             "visibility": visibility,
@@ -100,7 +99,7 @@ class VaultClient:
         resp.raise_for_status()
         return resp.json()
 
-    async def get_vault(self, vault_id: str) -> Dict[str, Any]:
+    async def get_vault(self, vault_id: str) -> dict[str, Any]:
         """Fetch a single vault by ID."""
         resp = await self._client.get(
             self._url(f"s/{vault_id}"), params=self._params(),
@@ -113,11 +112,11 @@ class VaultClient:
     async def upload_files(
         self,
         vault_id: str,
-        files: List[Dict[str, Any]],
+        files: list[dict[str, Any]],
         *,
         layer: str = "raw",
         path_prefix: str = "/",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Upload one or more files into a vault layer.
 
         Each entry in *files* must contain:
@@ -147,7 +146,7 @@ class VaultClient:
         *,
         layer: str = "workspace",
         path: str = "/",
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """List documents in the vault tree at *path* within *layer*."""
         resp = await self._client.get(
             self._url(f"s/{vault_id}/tree"),
@@ -161,8 +160,8 @@ class VaultClient:
         vault_id: str,
         document_id: str,
         *,
-        version: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        version: str | None = None,
+    ) -> dict[str, Any]:
         """Fetch a single document (metadata + content).
 
         Optionally specify *version* (commit SHA) to retrieve a historical
@@ -185,7 +184,7 @@ class VaultClient:
         *,
         layer: str = "canonical",
         limit: int = 20,
-    ) -> List[Dict[str, Any]]:
+    ) -> list[dict[str, Any]]:
         """Full-text / semantic search within a vault layer."""
         resp = await self._client.get(
             self._url(f"s/{vault_id}/search"),
@@ -203,8 +202,8 @@ class VaultClient:
     async def approve(
         self,
         vault_id: str,
-        document_ids: List[str],
-    ) -> Dict[str, Any]:
+        document_ids: list[str],
+    ) -> dict[str, Any]:
         """Approve documents — promotes them from Workspace to Canonical."""
         resp = await self._client.post(
             self._url(f"s/{vault_id}/approve"),
@@ -217,12 +216,12 @@ class VaultClient:
     async def reject(
         self,
         vault_id: str,
-        document_ids: List[str],
+        document_ids: list[str],
         *,
         reason: str = "",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Reject documents — marks them as rejected in Workspace."""
-        body: Dict[str, Any] = {"document_ids": document_ids}
+        body: dict[str, Any] = {"document_ids": document_ids}
         if reason:
             body["reason"] = reason
         resp = await self._client.post(
@@ -238,7 +237,7 @@ class VaultClient:
         vault_id: str,
         *,
         target: str = "all",
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Trigger ingestion of Canonical documents into downstream systems.
 
         *target* controls which downstream systems receive the data:
@@ -259,14 +258,14 @@ class VaultClient:
         vault_id: str,
         *,
         enabled: bool,
-        source_id: Optional[str] = None,
-    ) -> Dict[str, Any]:
+        source_id: str | None = None,
+    ) -> dict[str, Any]:
         """Toggle auto-pilot mode for a vault or a specific source.
 
         When auto-pilot is enabled, incoming documents are automatically
         approved and promoted to Canonical without manual review.
         """
-        body: Dict[str, Any] = {"enabled": enabled}
+        body: dict[str, Any] = {"enabled": enabled}
         if source_id is not None:
             body["source_id"] = source_id
         resp = await self._client.put(

@@ -7,16 +7,25 @@ path still works identically with no TracerProvider configured at all
 (the no-op path a customer who doesn't want telemetry gets by default).
 """
 import pytest
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from vouchstone_sdk import (
-    Agent, AgentConfig, CompatibilityGate, EchoEngineAdapter, Diff,
-    FileChange, Forge, Policy, PolicyGraph, WorkflowTrace,
-    configure_telemetry, get_tracer, is_otel_available, span, record_exception,
+    Agent,
+    AgentConfig,
+    CompatibilityGate,
+    Diff,
+    EchoEngineAdapter,
+    FileChange,
+    Forge,
+    Policy,
+    PolicyGraph,
+    WorkflowTrace,
+    configure_telemetry,
+    is_otel_available,
+    record_exception,
+    span,
 )
-from vouchstone_sdk.types import AgentResponse, Message, MemoryContext
-
-
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
+from vouchstone_sdk.types import AgentResponse, MemoryContext, Message
 
 # OTel's global TracerProvider can only be set once per process (it warns
 # and no-ops on a second set_tracer_provider() call) -- that's standard,
@@ -47,8 +56,9 @@ def test_span_is_a_real_noop_when_tracer_unavailable():
     the exact condition span() branches on -- rather than fighting OTel's
     global-provider-set-once-per-process singleton, which this same test
     file's module-level configure_telemetry() call has already set."""
-    import vouchstone_sdk.telemetry as telemetry_module
     from unittest.mock import patch
+
+    import vouchstone_sdk.telemetry as telemetry_module
 
     with patch.object(telemetry_module, "get_tracer", return_value=None):
         with telemetry_module.span("some.operation", {"key": "value"}) as current_span:

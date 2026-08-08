@@ -126,7 +126,7 @@ class GitHubIngester(BaseIngester):
                             "files_changed": changed_files,
                             "additions": additions,
                             "deletions": deletions,
-                            "labels": [l.get("name", "") for l in pr.get("labels", [])],
+                            "labels": [label.get("name", "") for label in pr.get("labels", [])],
                             "reviewers": [
                                 r.get("login", "")
                                 for r in pr.get("requested_reviewers", [])
@@ -240,7 +240,7 @@ class GitHubIngester(BaseIngester):
                         "repo": repo,
                         "number": issue["number"],
                         "state": issue.get("state", "open"),
-                        "labels": [l.get("name", "") for l in issue.get("labels", [])],
+                        "labels": [label.get("name", "") for label in issue.get("labels", [])],
                         "assignees": [
                             a.get("login", "")
                             for a in issue.get("assignees", [])

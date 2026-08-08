@@ -15,17 +15,20 @@ Runtime pipeline:
   Meta runs on a scheduled basis.
 """
 
-from typing import Optional, List, Dict, Any
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta
-import json
-import hashlib
 import asyncio
+import hashlib
+import json
 import logging
+from typing import Any
 
 from .types import (
-    MemoryEntry, Decision, Episode, EpisodicTrace, Entity,
-    Skill, MemoryContext, TurnResult, HealthReport, MemoryLayer,
+    Entity,
+    EpisodicTrace,
+    HealthReport,
+    MemoryContext,
+    MemoryEntry,
+    Skill,
+    TurnResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -53,11 +56,11 @@ class WorkingMemory:
     SESSION_TTL = 3600
     MAX_ENTRIES = 200
 
-    def __init__(self, redis_url: Optional[str] = None):
+    def __init__(self, redis_url: str | None = None):
         self.redis_url = redis_url
-        self._redis = None
-        self._local: Dict[str, List[Dict[str, Any]]] = {}
-        self._scratchpads: Dict[str, Dict[str, Any]] = {}
+        self._redis: Any = None
+        self._local: dict[str, list[dict[str, Any]]] = {}
+        self._scratchpads: dict[str, dict[str, Any]] = {}
 
     async def initialize(self):
         if self.redis_url:
@@ -78,7 +81,7 @@ class WorkingMemory:
         return f"wm:{agent_id}:{session_id}"
 
     async def append(self, agent_id: str, session_id: str, role: str, content: str,
-                     metadata: Dict[str, Any] = None):
+                     metadata: dict[str, Any] | None = None):
         entry = {"role": role, "content": content, "metadata": metadata or {}}
         if self._redis:
             key = self._key(agent_id, session_id)
@@ -91,7 +94,7 @@ class WorkingMemory:
             self._local[key] = self._local[key][-self.MAX_ENTRIES:]
 
     async def get_context(self, agent_id: str, session_id: str,
-                          max_tokens: int = 4000) -> List[Dict[str, Any]]:
+                          max_tokens: int = 4000) -> list[dict[str, Any]]:
         if self._redis:
             key = self._key(agent_id, session_id)
             raw = await self._redis.lrange(key, 0, -1)
@@ -100,7 +103,7 @@ class WorkingMemory:
             key = self._key(agent_id, session_id)
             entries = list(self._local.get(key, []))
 
-        result = []
+        result: list[dict[str, Any]] = []
         budget = max_tokens
         for entry in reversed(entries):
             cost = len(entry["content"]) // 4
@@ -111,14 +114,14 @@ class WorkingMemory:
         return result
 
     async def set_scratchpad(self, agent_id: str, session_id: str,
-                             data: Dict[str, Any]):
+                             data: dict[str, Any]):
         if self._redis:
             key = f"scratch:{agent_id}:{session_id}"
             await self._redis.set(key, json.dumps(data), ex=self.SESSION_TTL)
         else:
             self._scratchpads[f"{agent_id}:{session_id}"] = data
 
-    async def get_scratchpad(self, agent_id: str, session_id: str) -> Dict[str, Any]:
+    async def get_scratchpad(self, agent_id: str, session_id: str) -> dict[str, Any]:
         if self._redis:
             key = f"scratch:{agent_id}:{session_id}"
             raw = await self._redis.get(key)
@@ -151,7 +154,7 @@ class EpisodicMemory:
     def __init__(self, api_client=None, retention_days: int = 90):
         self.api_client = api_client
         self.retention_days = retention_days
-        self._local_traces: List[EpisodicTrace] = []
+        self._local_traces: list[EpisodicTrace] = []
 
     async def initialize(self):
         pass
@@ -185,10 +188,10 @@ class EpisodicMemory:
         self._local_traces.append(trace)
         return trace.id
 
-    async def get_recent(self, agent_id: str, session_id: Optional[str] = None,
-                         limit: int = 20) -> List[EpisodicTrace]:
+    async def get_recent(self, agent_id: str, session_id: str | None = None,
+                         limit: int = 20) -> list[EpisodicTrace]:
         if self.api_client:
-            params = {"limit": limit}
+            params: dict[str, Any] = {"limit": limit}
             if session_id:
                 params["session_id"] = session_id
             resp = await self.api_client._get(
@@ -201,11 +204,45 @@ class EpisodicMemory:
             traces = [t for t in traces if t.session_id == session_id]
         return sorted(traces, key=lambda t: t.timestamp, reverse=True)[:limit]
 
-    async def search(self, query: str, limit: int = 5) -> List[EpisodicTrace]:
+    async def search(self, query: str, limit: int = 5,
+                     agent_id: str | None = None) -> list[EpisodicTrace]:
+        """Substring search over episodic traces.
+
+        With an api_client configured, traces live server-side -- pull the
+        agent's recent window from the control plane's snapshot endpoint and
+        filter it here (there is no dedicated server-side episodic-search
+        route). Previously this method silently ignored api_client and only
+        searched the local list, so a control-plane-backed agent always got
+        [] back. ``agent_id`` is required for the server-side path.
+        """
         q = query.lower()
+
+        def _matches(user_input: str, agent_response: str) -> bool:
+            return q in user_input.lower() or q in agent_response.lower()
+
+        if self.api_client:
+            if not agent_id:
+                raise ValueError(
+                    "EpisodicMemory.search() needs agent_id when backed by "
+                    "the control plane -- traces are stored per-agent "
+                    "server-side."
+                )
+            resp = await self.api_client._get(
+                f"/memory-pipeline/snapshot/{agent_id}", params={"limit": max(limit * 10, 50)}
+            )
+            out: list[EpisodicTrace] = []
+            for t in resp.get("episodic", []):
+                if isinstance(t, dict) and _matches(
+                    t.get("user_input", ""), t.get("agent_response", "")
+                ):
+                    out.append(t)  # type: ignore[arg-type]
+                if len(out) >= limit:
+                    break
+            return out
+
         matches = [
             t for t in self._local_traces
-            if q in t.user_input.lower() or q in t.agent_response.lower()
+            if _matches(t.user_input, t.agent_response)
         ]
         return matches[:limit]
 
@@ -229,7 +266,7 @@ class SemanticMemory:
     def __init__(
         self,
         embedding_model: str = "text-embedding-3-small",
-        vector_db_url: Optional[str] = None,
+        vector_db_url: str | None = None,
         collection_name: str = "semantic_memory",
         api_client=None,
         local_only: bool = False,
@@ -247,9 +284,9 @@ class SemanticMemory:
         # network dependency. This is a deliberate mode, not a degraded
         # fallback from a failed connection.
         self.local_only = local_only
-        self._chroma_client = None
+        self._chroma_client: Any = None
         self._embedder = None
-        self._local_entities: Dict[str, Entity] = {}
+        self._local_entities: dict[str, Entity] = {}
         # Set when no vector_db_url was configured and the local embedded
         # Chroma client also couldn't be started -- search_entities() falls
         # back to plain substring matching with no vector search at all.
@@ -257,7 +294,7 @@ class SemanticMemory:
         # (no explicit durability promise was made), but it must be visible
         # to callers, not silent -- see MemoryPipeline.health_detail().
         self.degraded = False
-        self.degraded_reason: Optional[str] = None
+        self.degraded_reason: str | None = None
 
     async def initialize(self):
         if self.local_only:
@@ -316,12 +353,18 @@ class SemanticMemory:
 
     async def search_entities(self, agent_id: str, query: str,
                               top_k: int = 10,
-                              allowed_types: Optional[List[str]] = None) -> List[Entity]:
+                              allowed_types: list[str] | None = None,
+                              allowed_domains: list[str] | None = None) -> list[Entity]:
         """``allowed_types`` implements AgentConfig.scoped_subgraph ("Specialize")
-        -- when set, results are filtered to only those entity types, applied
-        uniformly after fetch regardless of which backend served the query
-        (api_client, vector search, or local dict), so scoping can't be
-        silently bypassed by whichever backend happens to be active."""
+        -- when set, results are filtered to only those entity types.
+        ``allowed_domains`` implements AgentConfig.scoped_domains -- when
+        set, results are filtered to entities whose
+        ``attributes["domains"]`` (a list of kg_domains slugs, mirroring
+        the control plane's ``KGNode.domains``) intersects it. Both are
+        applied uniformly after fetch regardless of which backend served
+        the query (api_client, vector search, or local dict), so scoping
+        can't be silently bypassed by whichever backend happens to be
+        active."""
         if self.api_client:
             resp = await self.api_client._post("/memory-pipeline/entities/search", {
                 "agent_id": agent_id,
@@ -338,11 +381,12 @@ class SemanticMemory:
                 if key.startswith(f"{agent_id}:") and q in e.entity_key.lower()
             ][:top_k]
 
-        return self._apply_scope(results, allowed_types)
+        return self._apply_scope(self._apply_domain_scope(results, allowed_domains), allowed_types)
 
     async def list_entities(self, agent_id: str,
-                            entity_type: Optional[str] = None,
-                            allowed_types: Optional[List[str]] = None) -> List[Entity]:
+                            entity_type: str | None = None,
+                            allowed_types: list[str] | None = None,
+                            allowed_domains: list[str] | None = None) -> list[Entity]:
         if self.api_client:
             resp = await self.api_client._get(
                 f"/memory-pipeline/entities/{agent_id}",
@@ -357,14 +401,29 @@ class SemanticMemory:
             if entity_type:
                 results = [e for e in results if e.entity_type == entity_type]
 
-        return self._apply_scope(results, allowed_types)
+        return self._apply_scope(self._apply_domain_scope(results, allowed_domains), allowed_types)
 
     @staticmethod
-    def _apply_scope(entities: List[Entity], allowed_types: Optional[List[str]]) -> List[Entity]:
+    def _apply_scope(entities: list[Entity], allowed_types: list[str] | None) -> list[Entity]:
         if not allowed_types:
             return entities
         allowed = set(allowed_types)
         return [e for e in entities if getattr(e, "entity_type", None) in allowed]
+
+    @staticmethod
+    def _apply_domain_scope(entities: list[Entity], allowed_domains: list[str] | None) -> list[Entity]:
+        """Flat kg_domains-slug filter -- see AgentConfig.scoped_domains for
+        why this doesn't do hierarchy expansion the way the control plane's
+        _matches_kg_scope does."""
+        if not allowed_domains:
+            return entities
+        allowed = set(allowed_domains)
+        out = []
+        for e in entities:
+            node_domains = set((getattr(e, "attributes", None) or {}).get("domains") or [])
+            if node_domains & allowed:
+                out.append(e)
+        return out
 
     async def _upsert_vector(self, agent_id: str, entity: Entity):
         collection = self._chroma_client.get_or_create_collection(
@@ -380,7 +439,7 @@ class SemanticMemory:
         )
 
     async def _vector_search(self, agent_id: str, query: str,
-                             top_k: int) -> List[Entity]:
+                             top_k: int) -> list[Entity]:
         try:
             collection = self._chroma_client.get_collection(
                 f"{self.collection_name}_{agent_id}"
@@ -400,13 +459,19 @@ class SemanticMemory:
             ))
         return entities
 
-    async def _get_embedding(self, text: str) -> List[float]:
+    async def _get_embedding(self, text: str) -> list[float]:
         """Raises on failure -- a fake zero-vector would silently corrupt
         every downstream cosine-similarity search (a zero-vector isn't "no
         opinion", it produces meaningless/degenerate similarity scores that
         look like real results). Callers must handle the failure, not
         receive corrupted data that looks valid."""
-        import openai
+        try:
+            import openai
+        except ImportError as exc:
+            raise ImportError(
+                "Semantic-memory embeddings require the OpenAI client. "
+                "Install it with: pip install 'vouchstone-sdk[llm-openai]'"
+            ) from exc
         client = openai.AsyncOpenAI()
         response = await client.embeddings.create(
             model=self.embedding_model, input=text
@@ -414,7 +479,7 @@ class SemanticMemory:
         return response.data[0].embedding
 
     # Legacy compatibility
-    async def store(self, text: str, metadata: Dict[str, Any] = None) -> str:
+    async def store(self, text: str, metadata: dict[str, Any] | None = None) -> str:
         doc_id = hashlib.md5(text.encode()).hexdigest()
         if self._chroma_client:
             embedding = await self._get_embedding(text)
@@ -425,7 +490,7 @@ class SemanticMemory:
             )
         return doc_id
 
-    async def search(self, query: str, top_k: int = 5) -> List[MemoryEntry]:
+    async def search(self, query: str, top_k: int = 5) -> list[MemoryEntry]:
         if self._chroma_client:
             embedding = await self._get_embedding(query)
             collection = self._chroma_client.get_or_create_collection(self.collection_name)
@@ -452,12 +517,16 @@ class ProceduralMemory:
     tracks execution success rate + average latency over time.
     """
 
-    def __init__(self, graph_db_url: Optional[str] = None, api_client=None):
+    def __init__(self, graph_db_url: str | None = None, api_client=None):
         self.graph_db_url = graph_db_url
         self.api_client = api_client
-        self._driver = None
-        self._pg_pool = None
-        self._local_skills: Dict[str, Skill] = {}
+        self._driver: Any = None
+        self._pg_pool: Any = None
+        self._local_skills: dict[str, Skill] = {}
+        # Count of skills whose graph persistence failed on BOTH paths --
+        # surfaced so operators can alert on durability loss instead of
+        # discovering it after a restart. See _upsert_graph_node_pg.
+        self.graph_write_errors: int = 0
 
     async def initialize(self):
         if self.graph_db_url:
@@ -534,10 +603,16 @@ class ProceduralMemory:
             skill.execution_count = n + 1
 
     async def find_skill(self, agent_id: str, query: str,
-                         allowed_tags: Optional[List[str]] = None) -> List[Skill]:
+                         allowed_tags: list[str] | None = None,
+                         allowed_domains: list[str] | None = None) -> list[Skill]:
         """``allowed_tags`` implements AgentConfig.scoped_subgraph ("Specialize")
-        for skills -- applied uniformly after fetch regardless of backend,
-        same rationale as SemanticMemory._apply_scope."""
+        for skills. ``allowed_domains`` implements AgentConfig.scoped_domains
+        -- Skill has no separate domains field, so a skill "belongs" to a
+        kg_domains slug by carrying it in its own ``tags`` list alongside
+        any other tags; the filter is the same set-intersection check,
+        just against a different allowed-set. Both applied uniformly after
+        fetch regardless of backend, same rationale as
+        SemanticMemory._apply_scope."""
         if self.api_client:
             resp = await self.api_client._get(
                 f"/memory-pipeline/skills/{agent_id}",
@@ -547,27 +622,109 @@ class ProceduralMemory:
         else:
             q = query.lower()
             results = [
-                s for key, s in self._local_skills.items()
-                if key.startswith(f"{agent_id}:") and (
-                    q in s.name.lower() or q in s.description.lower()
-                )
+                s for s in await self._all_skills(agent_id)
+                if q in s.name.lower() or q in s.description.lower()
             ]
-        return self._apply_scope(results, allowed_tags)
+        return self._apply_scope(self._apply_scope(results, allowed_domains), allowed_tags)
 
     async def list_skills(self, agent_id: str,
-                          allowed_tags: Optional[List[str]] = None) -> List[Skill]:
+                          allowed_tags: list[str] | None = None,
+                          allowed_domains: list[str] | None = None) -> list[Skill]:
         if self.api_client:
             resp = await self.api_client._get(f"/memory-pipeline/skills/{agent_id}")
             results = resp.get("skills", [])
         else:
-            results = [
-                s for key, s in self._local_skills.items()
-                if key.startswith(f"{agent_id}:")
-            ]
-        return self._apply_scope(results, allowed_tags)
+            results = await self._all_skills(agent_id)
+        return self._apply_scope(self._apply_scope(results, allowed_domains), allowed_tags)
+
+    async def _all_skills(self, agent_id: str) -> list[Skill]:
+        """The agent's skills: graph backend (durable) merged with the
+        in-process dict (this session's not-yet-read-back writes).
+
+        Previously reads NEVER touched the graph -- the Neo4j/AGE write in
+        register_skill was fire-and-forget and find/list only consulted
+        _local_skills, so every skill silently vanished on restart even
+        with graph_db_url configured. In-process entries win on name
+        collision (they are the freshest state, including this session's
+        execution-count updates the graph may not have yet).
+        """
+        merged: dict[str, Skill] = {
+            s.name: s for s in await self._load_skills_from_graph(agent_id)
+        }
+        for key, s in self._local_skills.items():
+            if key.startswith(f"{agent_id}:"):
+                merged[s.name] = s
+        return list(merged.values())
+
+    async def _load_skills_from_graph(self, agent_id: str) -> list[Skill]:
+        if self._driver:
+            async with self._driver.session() as session:
+                result = await session.run(
+                    "MATCH (s:Skill {agent_id: $agent_id}) RETURN s",
+                    agent_id=agent_id,
+                )
+                records = await result.data()
+            return [self._node_to_skill(r["s"]) for r in records]
+        if self._pg_pool:
+            async with self._pg_pool.acquire() as conn:
+                try:
+                    await conn.execute("LOAD 'age';")
+                    await conn.execute("SET search_path = ag_catalog, '$user', public;")
+                    rows = await conn.fetch(
+                        """
+                        SELECT * FROM cypher('vouchstone_graph', $$
+                            MATCH (s:Skill {agent_id: %s}) RETURN properties(s)
+                        $$) as (props agtype);
+                        """,
+                        agent_id,
+                    )
+                    return [
+                        self._node_to_skill(json.loads(str(row["props"])))
+                        for row in rows
+                    ]
+                except Exception as age_exc:
+                    logger.debug(
+                        "ProceduralMemory: AGE cypher read failed (%s); "
+                        "falling back to kg_nodes SQL", age_exc,
+                    )
+                    rows = await conn.fetch(
+                        "SELECT label, attributes FROM kg_nodes "
+                        "WHERE tenant_id IS NULL AND kind = 'skill'"
+                    )
+                    out = []
+                    for row in rows:
+                        attrs = row["attributes"]
+                        if isinstance(attrs, str):
+                            attrs = json.loads(attrs)
+                        out.append(self._node_to_skill({"name": row["label"], **(attrs or {})}))
+                    return out
+        return []
 
     @staticmethod
-    def _apply_scope(skills: List[Skill], allowed_tags: Optional[List[str]]) -> List[Skill]:
+    def _node_to_skill(props: dict[str, Any]) -> Skill:
+        def _as_list(value: Any) -> list[str]:
+            if isinstance(value, str):
+                try:
+                    parsed = json.loads(value)
+                    return parsed if isinstance(parsed, list) else []
+                except (json.JSONDecodeError, ValueError):
+                    return []
+            return list(value) if isinstance(value, list) else []
+
+        name = str(props.get("name", ""))
+        return Skill(
+            id=hashlib.md5(name.encode()).hexdigest(),
+            name=name,
+            description=str(props.get("description", name)),
+            steps=_as_list(props.get("steps")),
+            tools_required=_as_list(props.get("tools_required")),
+            version=int(props.get("version", 1) or 1),
+            success_rate=float(props.get("success_rate", 0.0) or 0.0),
+            execution_count=int(props.get("execution_count", 0) or 0),
+        )
+
+    @staticmethod
+    def _apply_scope(skills: list[Skill], allowed_tags: list[str] | None) -> list[Skill]:
         if not allowed_tags:
             return skills
         allowed = set(allowed_tags)
@@ -642,7 +799,13 @@ class ProceduralMemory:
                     """
                     await conn.execute(prereq_query, agent_id, skill.name, agent_id, prereq)
                 return
-            except Exception:
+            except Exception as age_exc:
+                # Intentional fallback: a Postgres without the AGE extension
+                # still persists skills via the plain kg_nodes table below.
+                logger.debug(
+                    "ProceduralMemory: AGE cypher path failed for skill %r "
+                    "(%s); falling back to kg_nodes SQL", skill.name, age_exc,
+                )
                 try:
                     attrs = {
                         "steps": skill.steps,
@@ -668,12 +831,26 @@ class ProceduralMemory:
                             VALUES ($1, 'skill', $2, $3, 1.0, 'promoted', $4)
                         """
                         await conn.execute(sql_insert, node_id, skill.name, json.dumps(attrs), json.dumps([]))
-                except Exception:
-                    pass
+                except Exception as sql_exc:
+                    # Both graph persistence paths failed: the skill exists
+                    # only in this process's memory and will NOT survive a
+                    # restart despite graph_db_url being configured. That is
+                    # a durability failure the operator must see -- this was
+                    # previously a bare `pass`, silently violating the
+                    # explicit-backend-means-durability contract that
+                    # MemoryBackendUnavailableError enforces at initialize().
+                    self.graph_write_errors += 1
+                    logger.error(
+                        "ProceduralMemory: graph persistence FAILED for skill "
+                        "%r (agent %s) -- AGE cypher and kg_nodes SQL both "
+                        "errored; the skill is in-process only and will not "
+                        "survive a restart. Last error: %s",
+                        skill.name, agent_id, sql_exc,
+                    )
 
     # Legacy compatibility
-    async def store_procedure(self, name: str, steps: List[str],
-                               conditions: Dict[str, Any] = None) -> str:
+    async def store_procedure(self, name: str, steps: list[str],
+                               conditions: dict[str, Any] | None = None) -> str:
         skill = Skill(
             id=hashlib.md5(name.encode()).hexdigest(),
             name=name, description=name, steps=steps,
@@ -681,7 +858,7 @@ class ProceduralMemory:
         self._local_skills[f"legacy:{name}"] = skill
         return name
 
-    async def get_relevant(self, context: str) -> List[Dict[str, Any]]:
+    async def get_relevant(self, context: str) -> list[dict[str, Any]]:
         context_lower = context.lower()
         return [
             {"name": s.name, "steps": s.steps, "success_rate": s.success_rate}
@@ -706,13 +883,23 @@ class MetaMemory:
     def __init__(self, api_client=None):
         self.api_client = api_client
 
-    async def run_maintenance(self, agent_id: str) -> Dict[str, Any]:
+    # Meta-memory (decay/dedup/compression/reflection) runs ONLY on the
+    # control plane -- there is no local implementation. Offline returns
+    # carry an explicit "unavailable" status rather than success-shaped
+    # empties: a caller inspecting {"operations": []} previously could not
+    # distinguish "maintenance ran and found nothing to do" from
+    # "maintenance never ran at all".
+    _OFFLINE_REASON = (
+        "meta-memory runs on the control plane; no api_client is configured"
+    )
+
+    async def run_maintenance(self, agent_id: str) -> dict[str, Any]:
         if self.api_client:
             resp = await self.api_client._post("/memory-pipeline/maintenance", {
                 "agent_id": agent_id,
             })
             return resp
-        return {"status": "no_api_client", "operations": []}
+        return {"status": "unavailable", "reason": self._OFFLINE_REASON, "operations": []}
 
     async def get_health(self, agent_id: str) -> HealthReport:
         if self.api_client:
@@ -722,14 +909,14 @@ class MetaMemory:
                 per_layer=resp.get("per_layer", {}),
                 recommendations=resp.get("recommendations", []),
             )
-        return HealthReport()
+        return HealthReport(recommendations=[f"unavailable: {self._OFFLINE_REASON}"])
 
-    async def run_reflection(self, agent_id: str, session_id: str) -> Dict[str, Any]:
+    async def run_reflection(self, agent_id: str, session_id: str) -> dict[str, Any]:
         if self.api_client:
             return await self.api_client._post(f"/memory-pipeline/reflect/{agent_id}", {
                 "session_id": session_id,
             })
-        return {"skills_discovered": 0}
+        return {"status": "unavailable", "reason": self._OFFLINE_REASON, "skills_discovered": 0}
 
 
 class MemoryPipeline:
@@ -753,22 +940,45 @@ class MemoryPipeline:
     def __init__(
         self,
         agent_id: str,
-        redis_url: Optional[str] = None,
-        vector_db_url: Optional[str] = None,
-        graph_db_url: Optional[str] = None,
+        redis_url: str | None = None,
+        vector_db_url: str | None = None,
+        graph_db_url: str | None = None,
         api_client=None,
-        scoped_subgraph: Optional[List[str]] = None,
+        scoped_subgraph: list[str] | None = None,
+        scoped_domains: list[str] | None = None,
         local_only: bool = False,
+        enabled_layers: dict[str, bool] | None = None,
+        embedding_model: str | None = None,
+        retention_days: int | None = None,
     ):
         self.agent_id = agent_id
         # See AgentConfig.scoped_subgraph -- constrains prepare_context()'s
         # semantic/procedural queries to this list of entity types / skill
         # tags. None means unscoped (matches pre-scoping behavior exactly).
         self.scoped_subgraph = scoped_subgraph
+        # See AgentConfig.scoped_domains -- a second, independent kg_domains
+        # slug filter (flat match, see agent.py's field docstring for why
+        # there's no hierarchy expansion here).
+        self.scoped_domains = scoped_domains
+        # Per-layer enable/disable, keyed "working" / "episodic" /
+        # "semantic" / "procedural" / "meta". Backs AgentConfig's five
+        # layer booleans -- which were documented but never read anywhere
+        # before this parameter existed. A disabled layer contributes its
+        # empty default to MemoryContext and skips its writes; its backend
+        # is never initialized.
+        layers = enabled_layers or {}
+        self.layer_enabled: dict[str, bool] = {
+            name: bool(layers.get(name, True))
+            for name in ("working", "episodic", "semantic", "procedural", "meta")
+        }
         self.working = WorkingMemory(redis_url=redis_url)
-        self.episodic = EpisodicMemory(api_client=api_client)
+        self.episodic = EpisodicMemory(
+            api_client=api_client,
+            **({"retention_days": retention_days} if retention_days is not None else {}),
+        )
         self.semantic = SemanticMemory(
             vector_db_url=vector_db_url, api_client=api_client, local_only=local_only,
+            **({"embedding_model": embedding_model} if embedding_model else {}),
         )
         self.procedural = ProceduralMemory(
             graph_db_url=graph_db_url, api_client=api_client
@@ -776,30 +986,61 @@ class MemoryPipeline:
         self.meta = MetaMemory(api_client=api_client)
 
     async def initialize(self):
-        await asyncio.gather(
-            self.working.initialize(),
-            self.episodic.initialize(),
-            self.semantic.initialize(),
-            self.procedural.initialize(),
-        )
+        tasks = []
+        if self.layer_enabled["working"]:
+            tasks.append(self.working.initialize())
+        if self.layer_enabled["episodic"]:
+            tasks.append(self.episodic.initialize())
+        if self.layer_enabled["semantic"]:
+            tasks.append(self.semantic.initialize())
+        if self.layer_enabled["procedural"]:
+            tasks.append(self.procedural.initialize())
+        if tasks:
+            await asyncio.gather(*tasks)
+
+    @staticmethod
+    async def _empty_list() -> list[Any]:
+        return []
+
+    @staticmethod
+    async def _empty_dict() -> dict[str, Any]:
+        return {}
 
     async def prepare_context(self, session_id: str, user_input: str,
                               max_tokens: int = 4000) -> MemoryContext:
-        wm_task = self.working.get_context(self.agent_id, session_id, max_tokens)
-        ep_task = self.episodic.get_recent(self.agent_id, session_id)
-        sem_task = self.semantic.search_entities(
-            self.agent_id, user_input, allowed_types=self.scoped_subgraph
+        wm_task = (
+            self.working.get_context(self.agent_id, session_id, max_tokens)
+            if self.layer_enabled["working"] else self._empty_list()
         )
-        proc_task = self.procedural.find_skill(
-            self.agent_id, user_input, allowed_tags=self.scoped_subgraph
+        ep_task = (
+            self.episodic.get_recent(self.agent_id, session_id)
+            if self.layer_enabled["episodic"] else self._empty_list()
         )
-        scratch_task = self.working.get_scratchpad(self.agent_id, session_id)
+        sem_task = (
+            self.semantic.search_entities(
+                self.agent_id, user_input,
+                allowed_types=self.scoped_subgraph, allowed_domains=self.scoped_domains,
+            )
+            if self.layer_enabled["semantic"] else self._empty_list()
+        )
+        proc_task = (
+            self.procedural.find_skill(
+                self.agent_id, user_input,
+                allowed_tags=self.scoped_subgraph, allowed_domains=self.scoped_domains,
+            )
+            if self.layer_enabled["procedural"] else self._empty_list()
+        )
+        scratch_task = (
+            self.working.get_scratchpad(self.agent_id, session_id)
+            if self.layer_enabled["working"] else self._empty_dict()
+        )
 
         wm, ep, sem, proc, scratch = await asyncio.gather(
             wm_task, ep_task, sem_task, proc_task, scratch_task
         )
 
-        await self.working.append(self.agent_id, session_id, "user", user_input)
+        if self.layer_enabled["working"]:
+            await self.working.append(self.agent_id, session_id, "user", user_input)
 
         return MemoryContext(
             working_memory=wm,
@@ -815,15 +1056,19 @@ class MemoryPipeline:
         turn_number: int,
         user_input: str,
         agent_response: str,
-        tools_used: List[str] = None,
+        tools_used: list[str] | None = None,
         tokens_in: int = 0,
         tokens_out: int = 0,
         latency_ms: int = 0,
         success: bool = True,
     ) -> TurnResult:
-        await self.working.append(
-            self.agent_id, session_id, "assistant", agent_response
-        )
+        if self.layer_enabled["working"]:
+            await self.working.append(
+                self.agent_id, session_id, "assistant", agent_response
+            )
+
+        if not self.layer_enabled["episodic"]:
+            return TurnResult(episodic_trace_id="")
 
         trace = EpisodicTrace(
             id=f"trace_{self.agent_id}_{session_id}_{turn_number}",
@@ -841,13 +1086,19 @@ class MemoryPipeline:
 
         return TurnResult(episodic_trace_id=trace_id)
 
-    async def run_reflection(self, session_id: str) -> Dict[str, Any]:
+    async def run_reflection(self, session_id: str) -> dict[str, Any]:
+        if not self.layer_enabled["meta"]:
+            return {"status": "disabled", "reason": "meta layer disabled in AgentConfig",
+                    "skills_discovered": 0}
         return await self.meta.run_reflection(self.agent_id, session_id)
 
-    async def run_maintenance(self) -> Dict[str, Any]:
+    async def run_maintenance(self) -> dict[str, Any]:
+        if not self.layer_enabled["meta"]:
+            return {"status": "disabled", "reason": "meta layer disabled in AgentConfig",
+                    "operations": []}
         return await self.meta.run_maintenance(self.agent_id)
 
-    def health_detail(self) -> Dict[str, Any]:
+    def health_detail(self) -> dict[str, Any]:
         """Surfaces degraded-mode state that doesn't raise on init (only
         SemanticMemory can end up here today -- WorkingMemory and
         ProceduralMemory raise MemoryBackendUnavailableError instead when an
@@ -859,7 +1110,7 @@ class MemoryPipeline:
             "semantic_degraded_reason": self.semantic.degraded_reason,
         }
 
-    async def get_snapshot(self) -> Dict[str, Any]:
+    async def get_snapshot(self) -> dict[str, Any]:
         if self.meta.api_client:
             return await self.meta.api_client._get(
                 f"/memory-pipeline/snapshot/{self.agent_id}"
