@@ -78,7 +78,20 @@ ignore = [
 ]
 
 [tool.mypy]
-python_version = "3.10"
+# NOTE: this is mypy's type-checking target, independent of `requires-python
+# = ">=3.10"` above (that's the SDK's runtime support floor; ruff's
+# `target-version = "py310"` + the UP lint rules are what actually guard
+# against 3.10-incompatible syntax in vouchstone_sdk itself). It's pinned to
+# CI's tested interpreter (3.12, see sdk-ci.yml/publish-sdk.yml) because
+# some optional-extra transitive deps (numpy 2.x's own stub, pulled in by
+# chromadb/qdrant-client in the `all`/`vector` extras -- not a direct
+# dependency of this package) ship stub syntax (PEP 695 `type` statements)
+# that only parses under python_version>=3.12. Under a lower target, mypy
+# hard-aborts the entire run on that stub's syntax before per-module
+# overrides (ignore_errors, follow_imports=skip) even get a chance to
+# apply, since imports found inside stub files are always followed
+# regardless of follow_imports (see follow_imports_for_stubs in mypy docs).
+python_version = "3.12"
 packages = ["vouchstone_sdk"]
 ignore_missing_imports = true
 check_untyped_defs = true
