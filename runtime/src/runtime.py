@@ -260,8 +260,17 @@ class AgentRuntime:
             if self._local_kg is not None and config.semantic_memory:
                 await self._seed_semantic_memory_from_local_kg(agent, runtime_agent_id)
         else:
+            # redis_url wired through here (Phase 1 of the multi-replica
+            # safety pass) so WorkingMemory actually uses the shared Redis
+            # backend instead of silently falling back to an in-process
+            # dict (see WorkingMemory.initialize() in memory.py) -- that
+            # fallback is per-pod and breaks session continuity the moment
+            # a client's requests land on more than one replica behind the
+            # Service, which the Helm chart already runs by default
+            # (replicaCount: 2, HPA up to 10).
             await agent.initialize(
                 agent_id=str(agent_def.get("id") or agent_def["name"]),
+                redis_url=self.settings.REDIS_URL,
                 vector_db_url=self.settings.VECTOR_DB_URL,
                 graph_db_url=self.settings.GRAPH_DB_URL,
             )

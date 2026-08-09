@@ -157,6 +157,13 @@ def cmd_status(args: argparse.Namespace) -> int:
         conn.close()
         payload["kg_schema_version"] = int(row[0]) if row else 1  # pre-versioning snapshot, implicit v1
 
+    # Forge engine prerequisite (C7, Phase 5: OpenCode default engine) --
+    # surfaced here for the same reason kg_schema_version is: a bundle
+    # consumer should see "opencode isn't installed" from `status`, not
+    # only discover it later, mid-request, as an EngineUnavailableError.
+    from vouchstone_sdk.forge import describe_forge_engine
+    payload["forge_engine"] = describe_forge_engine()
+
     print(json.dumps(payload, indent=2))
     return 0
 

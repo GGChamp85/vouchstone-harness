@@ -178,7 +178,15 @@ async def test_runtime_execute_tracks_execution_and_checkpoints(tmp_path):
 
     # checkpoint_sink is unset again after the call -- doesn't leak into
     # some future unrelated process() call on the same agent instance.
-    assert agent._checkpoint_sink is None
+    # (Phase 3 concurrency fix: checkpoint_sink moved from an instance
+    # attribute to a contextvars.ContextVar -- see vouchstone_sdk/agent.py
+    # -- so it's read back the same way, not off `agent` itself. Since this
+    # test awaits runtime.execute() directly with no intervening
+    # asyncio.create_task(), it runs in the same context as the assertion
+    # below, so the ContextVar correctly reflects the reset-to-None done in
+    # AgentRuntime.execute()'s `finally` block.)
+    from vouchstone_sdk.agent import _checkpoint_sink_var
+    assert _checkpoint_sink_var.get() is None
 
     await runtime.shutdown()
 

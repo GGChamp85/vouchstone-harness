@@ -93,11 +93,10 @@ exit codes, not just human-readable output.
 parses its actual JSON output — not a hand-rolled vulnerability list.
 Without `--requirement`, it scans the currently active Python
 environment; pass a requirements file to scan a specific pinned
-dependency set instead. See `.github/workflows/deploy.yml`'s
-`data-plane-test` job for a working CI example (currently wired as an
-advisory, non-blocking step — hard-gating deploys on it is a policy
-decision for whoever owns acceptable severity/allowlisting, not
-something this change bakes in implicitly).
+dependency set instead — e.g. `harness scan --requirement requirements.txt`
+as an advisory (non-blocking) step in your own CI; hard-gating deploys on
+it is a policy decision for whoever owns acceptable severity/allowlisting,
+not something this command bakes in implicitly.
 
 ## Bundle Format
 
@@ -130,9 +129,9 @@ existing v1 snapshot dedupes any edges that already duplicated under the
 old schema, keeping the most recently written attributes for each.
 
 See `src/bundle.py` for the manifest schema and verification logic, and
-`data-plane/sdk/python/vouchstone_sdk/graph.py` for `EntityGraph` — the
-KG snapshot is a persisted `EntityGraph`, nothing bundle-specific about
-its shape.
+[`sdk/python/vouchstone_sdk/graph.py`](../sdk/python/vouchstone_sdk/graph.py)
+for `EntityGraph` — the KG snapshot is a persisted `EntityGraph`, nothing
+bundle-specific about its shape.
 
 ## Sovereign Deployment Mode (C7b)
 
@@ -179,11 +178,17 @@ python -c "from src.sovereign import check_no_external_endpoints_reachable; chec
 ## Development
 
 ```bash
+cd runtime
 pip install -r requirements-dev.txt
 pytest tests/ -v
 ```
 
-Note: `requirements.txt` installs the SDK via `-e ../sdk/python` (editable,
-relative to this directory) — run `pip install` with `data-plane/runtime/`
-as the working directory, or see the Dockerfiles' build-context comments
-for how this resolves in a container build.
+`requirements.txt` installs `vouchstone-sdk` from PyPI (with the
+`redis`/`vector`/`graph` extras this runtime actually uses — see the
+comments in that file). To develop against local, unpublished SDK
+changes instead, swap that line for an editable install:
+
+```bash
+pip uninstall -y vouchstone-sdk
+pip install -e "../sdk/python[redis,vector,graph]"
+```

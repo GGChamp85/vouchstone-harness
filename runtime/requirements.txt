@@ -4,22 +4,10 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.5.0
 pydantic-settings>=2.1.0
 
-# AI/ML
+# RuntimeAgent calls OpenAI directly (src/runtime.py) -- not through the SDK's
+# provider abstraction, so this stays a direct dependency regardless of which
+# vouchstone-sdk extras are installed below.
 openai>=1.10.0
-anthropic>=0.18.0
-transformers>=4.36.0
-torch>=2.1.0
-
-# Vector DBs
-chromadb>=0.4.22
-qdrant-client>=1.7.0
-
-# Graph DB
-neo4j>=5.15.0
-
-# Message Queue
-celery>=5.3.0
-redis>=5.0.0
 
 # Monitoring
 prometheus-client>=0.19.0
@@ -27,16 +15,19 @@ structlog>=24.1.0
 
 # Utils
 httpx>=0.26.0
-python-multipart>=0.0.6
 aiofiles>=23.2.0
-python-jose[cryptography]>=3.3.0
 cryptography>=41.0.0
 
-# Vouchstone SDK — the runtime imports `vouchstone_sdk` at both module and
-# call-site scope (Agent/AgentConfig/EntityGraph/etc.) but this was never
-# declared here, so a container built from just this file could never
-# actually import it. Installed from the sibling package in this repo;
-# the Dockerfile's build context must be data-plane/ (not data-plane/runtime/)
-# for the relative path below to resolve. Once C9 publishes to PyPI, switch
-# this to a normal pinned `vouchstone-sdk>=<version>` line.
--e ../sdk/python
+# Vouchstone SDK, from PyPI now that it's published. Extras enable exactly
+# what this runtime actually uses (grep-verified against src/*.py):
+#   redis  -- WorkingMemory backend, wired via Settings.REDIS_URL
+#   vector -- SemanticMemory on ChromaDB, wired via Settings.VECTOR_DB_URL
+#   graph  -- ProceduralMemory on Neo4j, wired via Settings.GRAPH_DB_URL
+vouchstone-sdk[redis,vector,graph]>=1.6.0
+
+# NOTE: previous versions of this file also declared anthropic, transformers,
+# torch, chromadb, qdrant-client (as a direct top-level dep -- it's now a
+# transitive dep of vouchstone-sdk[vector] instead), neo4j (same, now via
+# vouchstone-sdk[graph]), celery, python-multipart, and python-jose. None of
+# them are imported anywhere in src/ (verified by grep, including dynamic
+# imports) -- dropped.

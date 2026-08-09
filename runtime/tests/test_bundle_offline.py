@@ -61,7 +61,7 @@ def _build_manifest(tenant_id: str, agent_id: str, sign_hmac: bool = True, ed255
     }
     content = {
         "bundle_ref": f"{agent_id}-test", "tenant_id": tenant_id, "agents": [agent_def],
-        "sdk_version": "1.3.0", "kg_snapshot_filename": "kg_snapshot.sqlite",
+        "sdk_version": "1.6.0", "kg_snapshot_filename": "kg_snapshot.sqlite",
         "kg_entity_count": len(entities), "kg_snapshot_hash": compute_kg_snapshot_hash(entities, edges),
         "created_at": "2026-01-01T00:00:00+00:00",
     }

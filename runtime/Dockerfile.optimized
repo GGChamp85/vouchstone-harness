@@ -1,13 +1,23 @@
 # Optimized Dockerfile with multi-stage build to reduce final image size
 #
-# Build context MUST be data-plane/ (the parent of this file's directory):
-#   docker build -f data-plane/runtime/Dockerfile.optimized -t vouchstone/runtime data-plane/
-# requirements.txt installs the SDK via `-e ../sdk/python` (editable), which
-# means the SDK source at /sdk/python must be present at RUNTIME too, not
-# just in the builder stage -- pip's editable install records an absolute
-# path back to the source, it doesn't copy the package files into
-# site-packages the way a normal install does.
-FROM python:3.11-slim as builder
+# Standard build context: this file's own directory.
+#   docker build -f Dockerfile.optimized -t vouchstone/runtime .
+# requirements.txt installs vouchstone-sdk from PyPI as a normal (non-
+# editable) dependency -- no SDK source needs to ship in the final image,
+# unlike the old editable-install convention (from before the SDK was
+# published).
+#
+# Builder installs into a venv rather than `pip install --user`: a --user
+# install resolves its target directory from $HOME at *install* time
+# (/root, since the builder stage runs as root) but Python resolves
+# site.getusersitepackages() from $HOME again at *import* time -- and the
+# final stage runs as the non-root `vouchstone` user, whose $HOME is
+# /home/vouchstone, not /root, so `import vouchstone_sdk` fails with
+# ModuleNotFoundError even though /root/.local was copied in (verified by
+# actually running the built image, not just building it). A venv's
+# absolute paths don't depend on which user or $HOME is active, so it
+# doesn't have this failure mode.
+FROM python:3.11-slim AS builder
 
 WORKDIR /app
 
@@ -16,13 +26,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     && rm -rf /var/lib/apt/lists/*
 
-# SDK first (sibling path to /app, matching the source tree's layout).
-COPY sdk/python /sdk/python
+RUN python -m venv /opt/venv
+ENV PATH="/opt/venv/bin:$PATH"
 
 # Copy requirements and install dependencies
-COPY runtime/requirements.txt .
-# Install all dependencies including build tools
-RUN pip install --user --no-cache-dir --progress-bar off -r requirements.txt
+COPY requirements.txt .
+RUN pip install --no-cache-dir --progress-bar off -r requirements.txt
 
 # Final stage - minimal runtime image
 FROM python:3.11-slim
@@ -35,21 +44,18 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/* \
     && apt-get clean
 
-# Copy installed packages from builder
-COPY --from=builder /root/.local /root/.local
-# SDK source must also ship in the final image -- see note above on why an
-# editable install needs it present at runtime, not just at build time.
-COPY --chown=vouchstone:vouchstone sdk/python /sdk/python
+# Copy the venv from the builder -- readable by any user, no $HOME
+# dependency at import time.
+COPY --from=builder /opt/venv /opt/venv
 
 # Create non-root user
 RUN useradd -m -u 1000 vouchstone
 
 # Copy application files
-COPY --chown=vouchstone:vouchstone runtime/src/ ./src/
-COPY --chown=vouchstone:vouchstone runtime/config/ ./config/
+COPY --chown=vouchstone:vouchstone src/ ./src/
+COPY --chown=vouchstone:vouchstone config/ ./config/
 
-# Make sure scripts in .local are usable
-ENV PATH=/root/.local/bin:$PATH
+ENV PATH="/opt/venv/bin:$PATH"
 ENV PYTHONPATH=/app
 ENV PYTHONUNBUFFERED=1
 
