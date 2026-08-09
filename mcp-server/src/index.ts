@@ -33,7 +33,7 @@ async function apiCall(path: string, options: RequestInit = {}) {
 
 const kgTools = new KnowledgeGraphTools(apiCall)
 const agentTools = new AgentTools(apiCall)
-const memoryTools = new MemoryTools(apiCall)
+const memoryTools = new MemoryTools(apiCall, TENANT_ID)
 const kgResources = new KnowledgeGraphResources(apiCall, TENANT_ID)
 
 const server = new Server(

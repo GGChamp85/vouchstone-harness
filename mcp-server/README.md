@@ -40,7 +40,7 @@ type-checked wrapper over one real endpoint:
 |---|---|---|
 | Knowledge Graph (`knowledge-graph.ts`) | `kg_query`, `kg_get_node`, `kg_list_nodes`, `kg_list_sub_graphs`, `kg_get_sub_graph`, `kg_stats`, `kg_quality`, `kg_provenance`, `kg_traverse`, `brain_chat`, `brain_insights`, `vault_list`, `vault_tree`, `vault_get_document`, `vault_search`, `connector_sync`, `wiki_get_page`, `wiki_list`, `wiki_compile` (19) | `/api/v1/ckg/*`, `/api/v1/brain/*`, `/api/v1/vaults/*`, `/api/v1/connectors/*`, `/api/v1/wiki/*` |
 | Agents (`agents.ts`) | `agent_list`, `agent_get`, `agent_execute`, `agent_ask`, `agent_skills`, `agent_traces`, `agent_pause`, `agent_resume` (8) | `/api/v1/agents/*` |
-| Memory (`memory.ts`) | `memory_query_episodic`, `memory_query_semantic`, `memory_query_procedural`, `memory_get_context`, `memory_stats` (5) | see **Known limitations** below |
+| Memory (`memory.ts`) | `memory_query_episodic`, `memory_query_semantic`, `memory_query_procedural`, `memory_get_context`, `memory_stats` (5) | `/api/v1/memory-stores/entries/search`, `/api/v1/memory-pipeline/*` |
 
 **4 resources** (`src/resources/knowledge-graph.ts`) -- static, read-only
 views for clients that support MCP Resources:
@@ -54,23 +54,25 @@ views for clients that support MCP Resources:
 
 Every one of the routes above was checked against the control plane's
 actual mounted routers (`control-plane/backend/app/api/v1/router.py`) --
-not assumed from naming convention.
+not assumed from naming convention. Every route that requires `tenant_id`
+(nearly all of them -- this is a multi-tenant API where it's an explicit
+query param, not derived from the auth header alone) gets it from
+`VOUCHSTONE_TENANT_ID`, threaded through each tool/resource class's
+constructor.
 
-## Known limitations
+### Memory tools: real endpoint mapping
 
-**`memory.ts`'s five tools call routes that don't exist on the current
-backend.** They target `/api/v1/memory-stores/episodic/query`,
-`/semantic/query`, `/procedural`, `/context`, and `/stats` -- none of
-which are registered; the real memory-read surface today is
-`/api/v1/memory-pipeline/{prepare-context,entities/{agent_id},entities/search,skills/{agent_id},snapshot/{agent_id}}`
-and `/api/v1/memory-stores/entries` (see
-`control-plane/backend/app/api/v1/endpoints/memory_pipeline.py`). Calling
-any `memory_*` tool today will surface a real 404 from the control plane
--- an honest failure, not a silent stub -- but the tool is not yet
-correctly wired. Fixing it needs a deliberate mapping of each tool's
-intended semantics onto the real `memory-pipeline` request/response
-shapes, which wasn't done as a drive-by fix here to avoid guessing at
-that mapping. Tracked as follow-up work.
+`memory.ts`'s five tools don't map 1:1 onto a single "memory API" --
+there isn't one. Each is wired to whichever real, read-only endpoint
+actually backs its stated semantics:
+
+| Tool | Real endpoint | Notes |
+|---|---|---|
+| `memory_query_episodic` | `POST /api/v1/memory-stores/entries/search` (`memory_type=episodic`) | Full-text (ILIKE) search, not vector. `agent_id` optional -- omit to search all agents in the tenant. |
+| `memory_query_semantic` | `POST /api/v1/memory-pipeline/entities/search` | Real vector search when embeddings are configured (falls back to text search) -- `agent_id` required, the route is agent-scoped. `entity_type` isn't a route-level filter, so it's applied client-side after retrieval. |
+| `memory_query_procedural` | `GET /api/v1/memory-pipeline/skills/{agent_id}` | `agent_id` required. `skill_name`/`min_confidence` aren't route-level filters either -- applied client-side against the returned `skill_name`/`success_rate` fields. |
+| `memory_get_context` | `POST /api/v1/memory-pipeline/prepare-context` | The real 4-layer retrieval a live agent turn uses. It has a genuine side effect (appends a working-memory entry for the `session_id` you pass), so this tool always generates a fresh `mcp-scratch-<uuid>` session_id per call -- it never reads or writes a real agent session. |
+| `memory_stats` | `GET /api/v1/memory-pipeline/snapshot/{agent_id}` | Episodic/semantic/procedural counts, sample entities/skills, plus the tenant's meta-memory health report. `agent_id` required -- there's no tenant-wide aggregate endpoint. |
 
 ## Development
 
