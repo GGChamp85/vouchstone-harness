@@ -10,7 +10,8 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/index.js",
-    "dev": "tsx src/index.ts"
+    "dev": "tsx src/index.ts",
+    "test": "npm run build && node test/smoke.mjs"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0"
@@ -28,8 +29,8 @@
   "author": "Vouchstone LLC",
   "repository": {
     "type": "git",
-    "url": "https://github.com/GGChamp85/Vouchstone.git",
-    "directory": "data-plane/mcp-server"
+    "url": "https://github.com/GGChamp85/vouchstone-harness.git",
+    "directory": "mcp-server"
   },
   "homepage": "https://vouchstone.ai",
   "files": ["dist", "LICENSE", "NOTICE"]

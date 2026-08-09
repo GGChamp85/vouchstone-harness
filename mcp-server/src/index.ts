@@ -11,7 +11,6 @@ import {
 import { KnowledgeGraphTools } from './tools/knowledge-graph.js'
 import { AgentTools } from './tools/agents.js'
 import { MemoryTools } from './tools/memory.js'
-import { GovernanceTools } from './tools/governance.js'
 import { KnowledgeGraphResources } from './resources/knowledge-graph.js'
 
 const API_BASE = process.env.VOUCHSTONE_API_URL || 'http://localhost:8000'
@@ -35,8 +34,7 @@ async function apiCall(path: string, options: RequestInit = {}) {
 const kgTools = new KnowledgeGraphTools(apiCall)
 const agentTools = new AgentTools(apiCall)
 const memoryTools = new MemoryTools(apiCall)
-const governanceTools = new GovernanceTools(apiCall)
-const kgResources = new KnowledgeGraphResources(apiCall)
+const kgResources = new KnowledgeGraphResources(apiCall, TENANT_ID)
 
 const server = new Server(
   { name: 'vouchstone', version: '1.0.0' },
@@ -48,13 +46,12 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     ...kgTools.definitions(),
     ...agentTools.definitions(),
     ...memoryTools.definitions(),
-    ...governanceTools.definitions(),
   ],
 }))
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params
-  const allHandlers = { ...kgTools.handlers(), ...agentTools.handlers(), ...memoryTools.handlers(), ...governanceTools.handlers() }
+  const allHandlers = { ...kgTools.handlers(), ...agentTools.handlers(), ...memoryTools.handlers() }
   const handler = allHandlers[name]
   if (!handler) return { content: [{ type: 'text', text: `Unknown tool: ${name}` }], isError: true }
   try {

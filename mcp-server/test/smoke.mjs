@@ -52,9 +52,9 @@ async function main() {
     assert.ok(Array.isArray(tools) && tools.length > 0, 'expected a non-empty tools array')
   })
 
-  await check('tool set covers KG/agents/memory/governance categories', () => {
+  await check('tool set covers KG/agents/memory categories', () => {
     const names = new Set(tools.map((t) => t.name))
-    for (const expected of ['kg_query', 'kg_list_sub_graphs', 'agent_list', 'memory_query_semantic', 'governance_check_policy']) {
+    for (const expected of ['kg_query', 'kg_list_sub_graphs', 'agent_list', 'memory_query_semantic']) {
       assert.ok(names.has(expected), `expected tool "${expected}" to be present`)
     }
     // No fabricated AI-stack tools -- the real server never had these,
