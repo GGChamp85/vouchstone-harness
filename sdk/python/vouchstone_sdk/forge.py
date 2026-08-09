@@ -224,19 +224,18 @@ class OpenCodeEngineAdapter(EngineAdapter):
     shelling out to it, the way ``ClaudeEngineAdapter`` shells out to the
     Anthropic API but at process granularity instead of HTTP.
 
-    ASSUMED CLI INVOCATION CONTRACT -- READ BEFORE RELYING ON THIS IN
-    PRODUCTION. This adapter was written in an environment where the
-    ``opencode`` binary is not installed (``shutil.which("opencode")``
-    returns nothing here), so the exact flags/output format of the real
-    CLI could not be verified against the real thing. The contract this
-    adapter assumes and a human MUST verify on first real use:
+    VERIFIED CLI INVOCATION CONTRACT (against opencode 1.18.15, real
+    binary, real edits applied to a real working directory):
 
-        opencode run "<instruction>" --cwd <working_dir> --non-interactive
+        opencode run "<instruction>" --dir <working_dir>
 
     exits 0 on success having mutated files in place under
-    ``<working_dir>``, and exits non-zero with a human-readable failure
-    message on stderr otherwise. It also assumes ``opencode --version``
-    prints a version string to stdout.
+    ``<working_dir>`` (non-interactive is the CLI's default -- there is no
+    ``--non-interactive`` flag; ``-i``/``--interactive`` opts *into*
+    interactive mode instead), and exits non-zero with a usage/error
+    message on stderr otherwise (e.g. an unrecognized flag, which is
+    exactly how the previous ``--cwd``/``--non-interactive`` guess was
+    caught). ``opencode --version`` prints a version string to stdout.
 
     Deliberately, this adapter does NOT try to parse OpenCode's stdout
     into a structured diff -- that output format is undocumented from
@@ -292,9 +291,11 @@ class OpenCodeEngineAdapter(EngineAdapter):
         return found
 
     def _build_run_command(self, binary: str, instruction: str, workdir: Path) -> list[str]:
-        # ASSUMED CLI CONTRACT -- see class docstring. Adjust here (only)
-        # once the real binary's flags are verified.
-        return [binary, "run", instruction, "--cwd", str(workdir), "--non-interactive"]
+        # VERIFIED against the real opencode 1.18.15 binary -- see class
+        # docstring. `--cwd`/`--non-interactive` don't exist on the real
+        # CLI (usage-error, exit 1); `--dir` is correct and non-interactive
+        # is already the default.
+        return [binary, "run", instruction, "--dir", str(workdir)]
 
     async def _get_version(self, binary: str) -> str | None:
         """Best-effort version probe for Diff.metadata -- never load-bearing.

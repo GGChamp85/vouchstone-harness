@@ -172,8 +172,17 @@ def _cmd_oc_init(args: argparse.Namespace) -> int:
         for candidate in propose_agents_from_artifact(artifact):
             agents.append((
                 AgentConfig(**candidate.to_agent_config_kwargs()),
+                # allowed_tools=[] (not None): an auto-proposed, not-yet-
+                # human-reviewed agent gets read-only OpenCode permissions
+                # by default (read/glob/grep/list -- derive_permissions()
+                # always allows those -- everything else denied) until a
+                # human explicitly broadens it. Omitting allowed_tools
+                # entirely (None) means NO restriction at all, which would
+                # contradict "scoped permissions" for exactly the agents
+                # this command's README docs promise that for.
                 Scope(domains=candidate.scoped_domains,
-                      entity_types=candidate.scoped_subgraph),
+                      entity_types=candidate.scoped_subgraph,
+                      allowed_tools=[]),
             ))
     manifest = init_workspace(
         args.workspace, agents=agents, posture=HarnessPosture(args.posture),

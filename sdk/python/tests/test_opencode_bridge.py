@@ -123,16 +123,32 @@ def test_governed_import_denies_outside_agents_dir(tmp_path: Path):
     rogue = tmp_path / "not-an-agent.md"
     rogue.write_text("---\ndescription: sneaky\n---\nprompt")
     kwargs, gate_result, trace = governed_import(rogue)
-    # deny-by-default: the file isn't under .opencode/agents/... wait --
-    # governed_import builds the path as .opencode/agents/<name>.md, so the
-    # policy matches; the parse must still succeed for import. This asserts
-    # the allow path with a minimal valid file instead.
+    # deny-by-default: rel_path is the file's real location (governed_import
+    # no longer synthesizes a fake ".opencode/agents/<basename>" path -- see
+    # opencode.py's governed_import), so a file genuinely outside
+    # .opencode/agents/ fails agent_definition_policy_graph's location
+    # condition and the gate denies before import is ever attempted.
+    assert not gate_result.allow
+    assert kwargs is None
+    assert [e.kind for e in trace._entries] == ["opencode.agent_import_denied"]
+
+
+def test_governed_import_allows_when_genuinely_under_agents_dir(tmp_path: Path):
+    real = tmp_path / ".opencode" / "agents" / "sneaky.md"
+    real.parent.mkdir(parents=True)
+    real.write_text("---\ndescription: sneaky\n---\nprompt")
+    kwargs, gate_result, trace = governed_import(real)
     assert gate_result.allow
     assert kwargs is not None
 
 
 def test_governed_import_traces_parse_failures(tmp_path: Path):
-    path = tmp_path / "broken.md"
+    # Correctly located (under .opencode/agents/) so the location-based
+    # policy check allows it through to the parse step -- this test is
+    # specifically about the parse failure, not the location check (see
+    # test_governed_import_denies_outside_agents_dir for that).
+    path = tmp_path / ".opencode" / "agents" / "broken.md"
+    path.parent.mkdir(parents=True)
     path.write_text("---\ndescription: x\nbogus_key: y\n---\nprompt")
     kwargs, gate_result, trace = governed_import(path)
     assert gate_result.allow          # the gate passed (valid text change)

@@ -34,9 +34,9 @@ requires_opencode = pytest.mark.skipif(
 @requires_opencode
 def test_real_binary_version_probe():
     status = describe_forge_engine()
-    assert status["engine"] == "opencode"
-    assert status["available"] is True
-    assert status.get("version")
+    assert status["configured_engine"] == "opencode"
+    assert status["opencode_binary_present"] is True
+    assert status.get("opencode_version")
 
 
 @requires_opencode

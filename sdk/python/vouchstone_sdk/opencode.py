@@ -311,7 +311,14 @@ def governed_import(
     trace = trace or WorkflowTrace()
     gate = gate or CompatibilityGate(policy_graph=agent_definition_policy_graph())
 
-    rel_path = f".opencode/{AGENTS_DIR}/{p.name}"
+    # The real location the caller passed, not a synthesized one -- a
+    # synthesized ".opencode/agents/<basename>" path would make the
+    # location-based policy check below trivially satisfied for a file
+    # located anywhere on disk, which is exactly the bug this line used to
+    # have (see agent_definition_policy_graph's file_path regex: it exists
+    # to deny imports from outside .opencode/agents/, which only works if
+    # this is the file's real path).
+    rel_path = str(p)
     diff = Diff(
         description=f"OpenCode edit of agent definition {p.stem!r}",
         changes=[FileChange(
@@ -449,9 +456,17 @@ def init_workspace(
     Writes every agent (exported with its scope/posture), every skill, the
     Vouchstone command entries, and ``opencode.json`` wiring Vouchstone's
     MCP server (`mcp-server/`, 32 tools) so OpenCode sessions can query the
-    live KG / 5-layer memory / Vault while editing agents. ``mcp_command``
-    defaults to the published server started via node; pass your deployment's
-    actual command. Returns a manifest of everything written.
+    live KG / 5-layer memory / Vault while editing agents.
+
+    ``mcp_command`` defaults to ``npx -y @vouchstone/mcp-server`` -- **this
+    package is not yet published to npm** (confirmed: ``npm view
+    @vouchstone/mcp-server`` 404s). Until it is, OpenCode will fail to
+    connect to this MCP entry silently unless run with
+    ``--print-logs --log-level DEBUG`` (it only shows up as a WARN there,
+    not a visible error in normal use) -- pass your own working
+    ``mcp_command`` (e.g. ``["node", "/path/to/mcp-server/dist/index.js"]``
+    against a local build) until the package is published.
+    Returns a manifest of everything written.
     """
     ws = Path(workspace)
     written: dict[str, list[str]] = {"agents": [], "skills": [], "commands": [], "config": []}
@@ -477,6 +492,17 @@ def init_workspace(
         existing = json.loads(config_path.read_text())
     existing.setdefault("$schema", "https://opencode.ai/config.json")
     mcp = existing.setdefault("mcp", {})
+    if mcp_command is None:
+        import sys
+        print(
+            "warning: init_workspace() is wiring the default MCP command "
+            "(npx -y @vouchstone/mcp-server), which is not yet published to "
+            "npm -- OpenCode sessions in this workspace will silently fail "
+            "to connect to it. Pass mcp_command= pointing at a local build "
+            "(e.g. [\"node\", \"/path/to/mcp-server/dist/index.js\"]) until "
+            "the package is published.",
+            file=sys.stderr,
+        )
     mcp["vouchstone"] = {
         "type": "local",
         "command": mcp_command or ["npx", "-y", "@vouchstone/mcp-server"],

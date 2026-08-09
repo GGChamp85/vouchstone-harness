@@ -11,12 +11,12 @@ two independent things without ever needing the real binary:
    explicit-mock variants of "opencode isn't there").
 2. The file-materialization/diffing mechanics work correctly against a
    trivial STUB SCRIPT that stands in for "a minimal CLI that accepts
-   `run <instruction> --cwd <dir> --non-interactive` and `--version`" --
-   this proves the adapter's own logic (snapshot -> invoke -> re-diff),
-   NOT that the real OpenCode CLI matches this exact contract. See
-   OpenCodeEngineAdapter's class docstring in forge.py for the explicit,
-   acknowledged gap: the real binary's actual flags/output format could
-   not be verified end-to-end in this environment.
+   `run <instruction> --dir <dir>` and `--version`" -- this proves the
+   adapter's own logic (snapshot -> invoke -> re-diff). The real binary's
+   contract (`--dir`, not `--cwd`; no `--non-interactive` flag -- it's the
+   default) has since been verified end-to-end against opencode 1.18.15
+   in tests/test_opencode_integration.py; this stub mirrors that verified
+   contract, not a guess.
 """
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ _STUB_SCRIPT = textwrap.dedent(
       cwd=""
       while [ "$#" -gt 0 ]; do
         case "$1" in
-          --cwd)
+          --dir)
             shift
             cwd="$1"
             ;;
