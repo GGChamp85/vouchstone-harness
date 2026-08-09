@@ -19,7 +19,7 @@ contributions are welcome — bug reports, fixes, docs, and well-scoped features
 ## Development setup
 
 ```bash
-cd data-plane/sdk/python
+cd sdk/python
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[all,dev]"
 ```

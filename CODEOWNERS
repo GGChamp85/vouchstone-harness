@@ -1,0 +1,8 @@
+# See https://docs.github.com/articles/about-code-owners for the syntax.
+# Last matching pattern wins, so more specific paths go below the catch-all.
+
+* @GGChamp85
+
+/sdk/python/       @GGChamp85
+/runtime/          @GGChamp85
+/mcp-server/       @GGChamp85

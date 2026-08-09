@@ -218,6 +218,13 @@ There is no CI workflow wired up for this repo yet (the private monorepo's CI co
 these same test suites as part of a larger pipeline) — run the commands above before
 opening a PR.
 
+## Contributing, changelog, and security
+
+- [CONTRIBUTING.md](CONTRIBUTING.md) — ground rules and dev setup for all three components.
+- [CHANGELOG.md](CHANGELOG.md) — repo-level history (`sdk/python` also keeps its own [package changelog](sdk/python/CHANGELOG.md)).
+- [SECURITY.md](SECURITY.md) — how to report a vulnerability, and scope notes for deployers.
+- [CODEOWNERS](CODEOWNERS) — who reviews what.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE). "Vouchstone" and "Forge" are trademarks
